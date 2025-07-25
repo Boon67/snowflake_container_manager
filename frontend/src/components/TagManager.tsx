@@ -19,6 +19,7 @@ import {
   DeleteOutlined,
   ReloadOutlined,
   TagsOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { api, Tag, CreateTag } from '../services/api.ts';
 
@@ -26,6 +27,8 @@ const { Title, Text } = Typography;
 
 const TagManager: React.FC = () => {
   const [tags, setTags] = useState<Tag[]>([]);
+  const [filteredTags, setFilteredTags] = useState<Tag[]>([]);
+  const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
@@ -40,11 +43,28 @@ const TagManager: React.FC = () => {
     try {
       const response = await api.getTags();
       setTags(response.data);
+      setFilteredTags(response.data);
     } catch (error) {
       message.error('Failed to load tags');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Filter tags based on search text
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    if (!value.trim()) {
+      setFilteredTags(tags);
+      return;
+    }
+
+    const filtered = tags.filter(tag => {
+      const searchLower = value.toLowerCase();
+      return tag.name.toLowerCase().includes(searchLower);
+    });
+    
+    setFilteredTags(filtered);
   };
 
   const handleCreate = () => {
@@ -97,6 +117,7 @@ const TagManager: React.FC = () => {
       title: 'Tag Name',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: Tag, b: Tag) => a.name.localeCompare(b.name),
       render: (text: string) => (
         <Space>
           <TagsOutlined style={{ color: '#1F86C9' }} />
@@ -109,6 +130,7 @@ const TagManager: React.FC = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 150,
+      sorter: (a: Tag, b: Tag) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
     {
@@ -161,9 +183,20 @@ const TagManager: React.FC = () => {
           </Space>
         </div>
 
+        <div style={{ marginBottom: 16 }}>
+          <Input
+            placeholder="Search tags by name..."
+            prefix={<SearchOutlined />}
+            value={searchText}
+            onChange={(e) => handleSearch(e.target.value)}
+            allowClear
+            style={{ maxWidth: 300 }}
+          />
+        </div>
+
         <Table
           columns={columns}
-          dataSource={tags}
+          dataSource={filteredTags}
           loading={loading}
           rowKey="id"
           pagination={{

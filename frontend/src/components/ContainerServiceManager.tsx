@@ -13,6 +13,7 @@ import {
   Modal,
   Spin,
   Alert,
+  Input,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -21,6 +22,7 @@ import {
   EyeOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { api, ContainerService, ComputePool } from '../services/api.ts';
 
@@ -28,7 +30,11 @@ const { Title, Text } = Typography;
 
 const ContainerServiceManager: React.FC = () => {
   const [containerServices, setContainerServices] = useState<ContainerService[]>([]);
+  const [filteredServices, setFilteredServices] = useState<ContainerService[]>([]);
+  const [serviceSearchText, setServiceSearchText] = useState('');
   const [computePools, setComputePools] = useState<ComputePool[]>([]);
+  const [filteredPools, setFilteredPools] = useState<ComputePool[]>([]);
+  const [poolSearchText, setPoolSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const [operationLoading, setOperationLoading] = useState<string | null>(null);
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
@@ -46,13 +52,56 @@ const ContainerServiceManager: React.FC = () => {
         api.getComputePools(),
       ]);
       setContainerServices(servicesResponse.data);
+      setFilteredServices(servicesResponse.data);
       setComputePools(poolsResponse.data);
+      setFilteredPools(poolsResponse.data);
     } catch (error) {
       message.error('Failed to load container services data');
       console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Filter container services based on search text
+  const handleServiceSearch = (value: string) => {
+    setServiceSearchText(value);
+    if (!value.trim()) {
+      setFilteredServices(containerServices);
+      return;
+    }
+
+    const filtered = containerServices.filter(service => {
+      const searchLower = value.toLowerCase();
+      const nameMatch = service.name.toLowerCase().includes(searchLower);
+      const statusMatch = service.status.toLowerCase().includes(searchLower);
+      const poolMatch = service.compute_pool?.toLowerCase().includes(searchLower);
+      const endpointMatch = service.endpoint_url?.toLowerCase().includes(searchLower);
+      
+      return nameMatch || statusMatch || poolMatch || endpointMatch;
+    });
+    
+    setFilteredServices(filtered);
+  };
+
+  // Filter compute pools based on search text
+  const handlePoolSearch = (value: string) => {
+    setPoolSearchText(value);
+    if (!value.trim()) {
+      setFilteredPools(computePools);
+      return;
+    }
+
+    const filtered = computePools.filter(pool => {
+      const searchLower = value.toLowerCase();
+      const nameMatch = pool.name.toLowerCase().includes(searchLower);
+      const stateMatch = pool.state.toLowerCase().includes(searchLower);
+      const familyMatch = pool.instance_family.toLowerCase().includes(searchLower);
+      
+      return nameMatch || stateMatch || familyMatch;
+    });
+    
+    setFilteredPools(filtered);
   };
 
   const handleStartService = async (serviceName: string) => {
@@ -120,6 +169,7 @@ const ContainerServiceManager: React.FC = () => {
       title: 'Service Name',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: ContainerService, b: ContainerService) => a.name.localeCompare(b.name),
       render: (text: string, record: ContainerService) => (
         <Space direction="vertical" size={0}>
           <Text strong style={{ color: '#1F86C9' }}>{text}</Text>
@@ -134,12 +184,14 @@ const ContainerServiceManager: React.FC = () => {
       dataIndex: 'status',
       key: 'status',
       width: 120,
+      sorter: (a: ContainerService, b: ContainerService) => a.status.localeCompare(b.status),
       render: (status: string) => getStatusBadge(status),
     },
     {
       title: 'Instances',
       key: 'instances',
       width: 100,
+      sorter: (a: ContainerService, b: ContainerService) => a.min_instances - b.min_instances,
       render: (_, record: ContainerService) => (
         <AntTag color="blue">
           {record.min_instances} - {record.max_instances}
@@ -151,6 +203,11 @@ const ContainerServiceManager: React.FC = () => {
       dataIndex: 'endpoint_url',
       key: 'endpoint_url',
       width: 150,
+      sorter: (a: ContainerService, b: ContainerService) => {
+        const aUrl = a.endpoint_url || '';
+        const bUrl = b.endpoint_url || '';
+        return aUrl.localeCompare(bUrl);
+      },
       render: (url: string) => (
         url ? (
           <Tooltip title={url}>
@@ -168,6 +225,7 @@ const ContainerServiceManager: React.FC = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
+      sorter: (a: ContainerService, b: ContainerService) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
     {
@@ -214,6 +272,7 @@ const ContainerServiceManager: React.FC = () => {
       title: 'Pool Name',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: ComputePool, b: ComputePool) => a.name.localeCompare(b.name),
       render: (text: string) => <Text strong style={{ color: '#1F86C9' }}>{text}</Text>,
     },
     {
@@ -221,12 +280,14 @@ const ContainerServiceManager: React.FC = () => {
       dataIndex: 'state',
       key: 'state',
       width: 120,
+      sorter: (a: ComputePool, b: ComputePool) => a.state.localeCompare(b.state),
       render: (state: string) => getPoolStateBadge(state),
     },
     {
       title: 'Nodes',
       key: 'nodes',
       width: 100,
+      sorter: (a: ComputePool, b: ComputePool) => a.min_nodes - b.min_nodes,
       render: (_, record: ComputePool) => (
         <AntTag color="purple">
           {record.min_nodes} - {record.max_nodes}
@@ -238,12 +299,14 @@ const ContainerServiceManager: React.FC = () => {
       dataIndex: 'instance_family',
       key: 'instance_family',
       width: 150,
+      sorter: (a: ComputePool, b: ComputePool) => a.instance_family.localeCompare(b.instance_family),
     },
     {
       title: 'Created',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
+      sorter: (a: ComputePool, b: ComputePool) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
   ];
@@ -265,6 +328,17 @@ const ContainerServiceManager: React.FC = () => {
           </Button>
         </div>
 
+        <div style={{ marginBottom: 16 }}>
+          <Input
+            placeholder="Search container services by name, status, pool, or endpoint..."
+            prefix={<SearchOutlined />}
+            value={serviceSearchText}
+            onChange={(e) => handleServiceSearch(e.target.value)}
+            allowClear
+            style={{ maxWidth: 500 }}
+          />
+        </div>
+
         {containerServices.length === 0 && !loading ? (
           <Alert
             message="No Container Services Found"
@@ -276,7 +350,7 @@ const ContainerServiceManager: React.FC = () => {
         ) : (
           <Table
             columns={serviceColumns}
-            dataSource={containerServices}
+            dataSource={filteredServices}
             loading={loading}
             rowKey="name"
             pagination={{
@@ -297,6 +371,17 @@ const ContainerServiceManager: React.FC = () => {
           </Title>
         </div>
 
+        <div style={{ marginBottom: 16 }}>
+          <Input
+            placeholder="Search compute pools by name, state, or instance family..."
+            prefix={<SearchOutlined />}
+            value={poolSearchText}
+            onChange={(e) => handlePoolSearch(e.target.value)}
+            allowClear
+            style={{ maxWidth: 450 }}
+          />
+        </div>
+
         {computePools.length === 0 && !loading ? (
           <Alert
             message="No Compute Pools Found"
@@ -307,7 +392,7 @@ const ContainerServiceManager: React.FC = () => {
         ) : (
           <Table
             columns={poolColumns}
-            dataSource={computePools}
+            dataSource={filteredPools}
             loading={loading}
             rowKey="name"
             pagination={{

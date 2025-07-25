@@ -298,6 +298,9 @@ async def create_parameter(
     """Create a new parameter"""
     db = get_database()
     
+    # Debug print
+    logger.info(f"Creating parameter: name={parameter.name}, key={parameter.key}")
+    
     # Check if parameter key already exists
     existing_param = db.execute_query("SELECT ID FROM PARAMETERS WHERE KEY = %s", (parameter.key,))
     if existing_param:
@@ -305,8 +308,8 @@ async def create_parameter(
     
     param_id = str(uuid.uuid4())
     db.execute_non_query(
-        "INSERT INTO PARAMETERS (ID, KEY, VALUE, DESCRIPTION, IS_SECRET) VALUES (%s, %s, %s, %s, %s)",
-        (param_id, parameter.key, parameter.value, parameter.description, parameter.is_secret)
+        "INSERT INTO PARAMETERS (ID, NAME, KEY, VALUE, DESCRIPTION, IS_SECRET) VALUES (%s, %s, %s, %s, %s, %s)",
+        (param_id, parameter.name, parameter.key, parameter.value, parameter.description, parameter.is_secret)
     )
     
     # Handle tags
@@ -350,6 +353,7 @@ async def create_parameter(
     
     return models.Parameter(
         id=param_data['ID'],
+        name=param_data.get('NAME'),
         key=param_data['KEY'],
         value=param_data['VALUE'],
         description=param_data['DESCRIPTION'],
@@ -376,6 +380,10 @@ async def update_parameter(
     # Build update query
     update_fields = []
     params = []
+    
+    if parameter_update.name is not None:
+        update_fields.append("NAME = %s")
+        params.append(parameter_update.name)
     
     if parameter_update.key is not None:
         update_fields.append("KEY = %s")
@@ -445,6 +453,7 @@ async def update_parameter(
     
     return models.Parameter(
         id=param_data['ID'],
+        name=param_data.get('NAME'),
         key=param_data['KEY'],
         value=param_data['VALUE'],
         description=param_data['DESCRIPTION'],
@@ -533,8 +542,13 @@ async def delete_tag(
     
     return models.APIResponse(message="Tag deleted successfully")
 
+@app.get("/test-name-field")
+async def test_name_field():
+    """Test endpoint to verify name field functionality"""
+    return {"test": "name field endpoint", "name": "test_value"}
+
 # --- Search and Filter Endpoints ---
-@app.post("/api/parameters/search", response_model=List[models.Parameter])
+@app.post("/api/parameters/search")
 async def search_parameters(
     filter_params: models.ParameterFilter,
     current_user: models.User = Depends(auth.get_current_active_user)
@@ -559,7 +573,7 @@ async def search_parameters(
         params.append(filter_params.is_secret)
     
     base_query = """
-        SELECT DISTINCT p.ID, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
+        SELECT DISTINCT p.ID, p.NAME, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
         FROM PARAMETERS p
     """
     
@@ -599,17 +613,19 @@ async def search_parameters(
             }
             tags.append(models.Tag(**mapped_tag))
         
-        parameter = models.Parameter(
-            id=param_data['ID'],
-            key=param_data['KEY'],
-            value=param_data['VALUE'],
-            description=param_data['DESCRIPTION'],
-            is_secret=param_data['IS_SECRET'],
-            created_at=param_data['CREATED_AT'],
-            updated_at=param_data['UPDATED_AT'],
-            tags=tags
-        )
-        result_parameters.append(parameter)
+        # Manually construct parameter dict to ensure all fields are included
+        parameter_dict = {
+            "id": param_data['ID'],
+            "name": param_data.get('NAME'),
+            "key": param_data['KEY'],
+            "value": param_data['VALUE'],
+            "description": param_data['DESCRIPTION'],
+            "is_secret": param_data['IS_SECRET'],
+            "created_at": param_data['CREATED_AT'].isoformat() if param_data['CREATED_AT'] else None,
+            "updated_at": param_data['UPDATED_AT'].isoformat() if param_data['UPDATED_AT'] else None,
+            "tags": [{"id": tag.id, "name": tag.name, "created_at": tag.created_at.isoformat()} for tag in tags]
+        }
+        result_parameters.append(parameter_dict)
     
     return result_parameters
 
@@ -765,7 +781,7 @@ async def get_unassigned_parameters(
     db = get_database()
     
     query = """
-        SELECT p.ID, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
+        SELECT p.ID, p.NAME, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
         FROM PARAMETERS p
         WHERE p.ID NOT IN (SELECT PARAMETER_ID FROM SOLUTION_PARAMETERS)
         ORDER BY p.KEY
@@ -795,6 +811,7 @@ async def get_unassigned_parameters(
         
         parameter = models.Parameter(
             id=param_data['ID'],
+            name=param_data.get('NAME'),
             key=param_data['KEY'],
             value=param_data['VALUE'],
             description=param_data['DESCRIPTION'],

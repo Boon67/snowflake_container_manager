@@ -173,7 +173,7 @@ const Login: React.FC = () => {
             padding: '16px'
           }}>
             <Text style={{ color: '#6C757D', fontSize: '14px' }}>
-              Default credentials: <strong style={{ color: '#212529' }}>admin</strong> / <strong style={{ color: '#212529' }}>admin</strong>
+              Default credentials: <strong style={{ color: '#212529' }}>admin</strong> / <strong style={{ color: '#212529' }}>password123</strong>
             </Text>
             <br />
             <Text style={{ color: '#6C757D', fontSize: '12px', marginTop: '8px', display: 'block' }}>

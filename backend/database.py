@@ -198,6 +198,7 @@ class SnowflakeConnection:
         parameters_table = """
         CREATE TABLE IF NOT EXISTS PARAMETERS (
             ID VARCHAR(36) PRIMARY KEY,
+            NAME VARCHAR(255),
             KEY VARCHAR(255) NOT NULL UNIQUE,
             VALUE VARCHAR,
             DESCRIPTION VARCHAR(1000),
@@ -299,19 +300,19 @@ class SnowflakeConnection:
 
             # Create sample parameters
             sample_parameters = [
-                (str(uuid.uuid4()), "app_name", "Configuration Manager", "Application name", False, [env_tag]),
-                (str(uuid.uuid4()), "app_version", "1.0.0", "Application version", False, [env_tag]),
-                (str(uuid.uuid4()), "environment", "development", "Current environment", False, [env_tag]),
-                (str(uuid.uuid4()), "db_connection_timeout", "30", "Database connection timeout in seconds", False, [db_tag]),
-                (str(uuid.uuid4()), "api_rate_limit", "1000", "API requests per minute limit", False, [api_tag]),
-                (str(uuid.uuid4()), "secret_key", "your-secret-key-here", "Application secret key", True, [env_tag]),
+                (str(uuid.uuid4()), "Application Name", "app_name", "Configuration Manager", "Application name", False, [env_tag]),
+                (str(uuid.uuid4()), "Application Version", "app_version", "1.0.0", "Application version", False, [env_tag]),
+                (str(uuid.uuid4()), "Environment", "environment", "development", "Current environment", False, [env_tag]),
+                (str(uuid.uuid4()), "DB Connection Timeout", "db_connection_timeout", "30", "Database connection timeout in seconds", False, [db_tag]),
+                (str(uuid.uuid4()), "API Rate Limit", "api_rate_limit", "1000", "API requests per minute limit", False, [api_tag]),
+                (str(uuid.uuid4()), "Secret Key", "secret_key", "your-secret-key-here", "Application secret key", True, [env_tag]),
             ]
 
-            for param_id, key, value, description, is_secret, tag_ids in sample_parameters:
+            for param_id, name, key, value, description, is_secret, tag_ids in sample_parameters:
                 # Insert parameter
                 self.execute_non_query(
-                    "INSERT INTO PARAMETERS (ID, KEY, VALUE, DESCRIPTION, IS_SECRET) VALUES (%s, %s, %s, %s, %s)",
-                    (param_id, key, value, description, is_secret)
+                    "INSERT INTO PARAMETERS (ID, NAME, KEY, VALUE, DESCRIPTION, IS_SECRET) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (param_id, name, key, value, description, is_secret)
                 )
                 
                 # Associate tags

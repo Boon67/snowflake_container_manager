@@ -24,6 +24,7 @@ import {
   ReloadOutlined,
   KeyOutlined,
   LockOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { api, Parameter, CreateParameter, UpdateParameter, Solution, Tag } from '../services/api.ts';
 
@@ -33,6 +34,8 @@ const { Option } = Select;
 
 const ParameterManager: React.FC = () => {
   const [parameters, setParameters] = useState<Parameter[]>([]);
+  const [filteredParameters, setFilteredParameters] = useState<Parameter[]>([]);
+  const [searchText, setSearchText] = useState('');
   const [solutions, setSolutions] = useState<Solution[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,12 +56,35 @@ const ParameterManager: React.FC = () => {
         api.getTags(),
       ]);
       setParameters(parametersRes.data);
+      setFilteredParameters(parametersRes.data);
       setTags(tagsRes.data);
     } catch (error) {
       message.error('Failed to load data');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Filter parameters based on search text
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    if (!value.trim()) {
+      setFilteredParameters(parameters);
+      return;
+    }
+
+    const filtered = parameters.filter(param => {
+      const searchLower = value.toLowerCase();
+      const nameMatch = param.name?.toLowerCase().includes(searchLower);
+      const keyMatch = param.key.toLowerCase().includes(searchLower);
+      const valueMatch = param.value?.toLowerCase().includes(searchLower);
+      const descMatch = param.description?.toLowerCase().includes(searchLower);
+      const tagMatch = param.tags.some(tag => tag.name.toLowerCase().includes(searchLower));
+      
+      return nameMatch || keyMatch || valueMatch || descMatch || tagMatch;
+    });
+    
+    setFilteredParameters(filtered);
   };
 
   const handleCreate = () => {
@@ -70,6 +96,7 @@ const ParameterManager: React.FC = () => {
   const handleEdit = (parameter: Parameter) => {
     setEditingParameter(parameter);
     form.setFieldsValue({
+      name: parameter.name,
       key: parameter.key,
       value: parameter.value,
       description: parameter.description,
@@ -115,27 +142,37 @@ const ParameterManager: React.FC = () => {
 
   const columns = [
     {
+      title: 'Name',
+      dataIndex: 'name',
+      key: 'name',
+      sorter: (a: Parameter, b: Parameter) => {
+        const aName = a.name || '';
+        const bName = b.name || '';
+        return aName.localeCompare(bName);
+      },
+      render: (text: string, record: Parameter) => (
+        <Text strong style={{ display: 'flex', alignItems: 'center' }}>
+          {record.is_secret ? <LockOutlined style={{ marginRight: 4, color: '#faad14' }} /> : <KeyOutlined style={{ marginRight: 4 }} />}
+          {text || <Text type="secondary">No name</Text>}
+        </Text>
+      ),
+    },
+    {
       title: 'Key',
       dataIndex: 'key',
       key: 'key',
-      render: (text: string, record: Parameter) => (
-        <Space direction="vertical" size={0}>
-          <Text strong style={{ display: 'flex', alignItems: 'center' }}>
-            {record.is_secret ? <LockOutlined style={{ marginRight: 4, color: '#faad14' }} /> : <KeyOutlined style={{ marginRight: 4 }} />}
-            {text}
-          </Text>
-          {record.description && (
-            <Text type="secondary" style={{ fontSize: '12px' }}>
-              {record.description}
-            </Text>
-          )}
-        </Space>
-      ),
+      sorter: (a: Parameter, b: Parameter) => a.key.localeCompare(b.key),
+      render: (text: string) => <Text code>{text}</Text>,
     },
     {
       title: 'Value',
       dataIndex: 'value',
       key: 'value',
+      sorter: (a: Parameter, b: Parameter) => {
+        const aValue = a.value || '';
+        const bValue = b.value || '';
+        return aValue.localeCompare(bValue);
+      },
       render: (text: string, record: Parameter) => (
         record.is_secret ? '••••••••' : <Text code>{text || <Text type="secondary">null</Text>}</Text>
       ),
@@ -144,6 +181,23 @@ const ParameterManager: React.FC = () => {
       title: 'Tags',
       dataIndex: 'tags',
       key: 'tags',
+      sorter: (a: Parameter, b: Parameter) => {
+        // Sort by first tag name alphabetically, then by number of tags
+        const aFirstTag = a.tags && a.tags.length > 0 ? a.tags[0].name : '';
+        const bFirstTag = b.tags && b.tags.length > 0 ? b.tags[0].name : '';
+        
+        // If both have tags, compare by first tag name
+        if (aFirstTag && bFirstTag) {
+          return aFirstTag.localeCompare(bFirstTag);
+        }
+        
+        // If only one has tags, prioritize the one with tags
+        if (aFirstTag && !bFirstTag) return -1;
+        if (!aFirstTag && bFirstTag) return 1;
+        
+        // If neither has tags, they're equal
+        return 0;
+      },
       render: (tags: Tag[]) => (
         <Space wrap>
           {tags.map(tag => (
@@ -159,6 +213,11 @@ const ParameterManager: React.FC = () => {
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
+      sorter: (a: Parameter, b: Parameter) => {
+        const aDesc = a.description || '';
+        const bDesc = b.description || '';
+        return aDesc.localeCompare(bDesc);
+      },
       render: (text: string) => text || <Text type="secondary">No description</Text>,
     },
     {
@@ -218,9 +277,20 @@ const ParameterManager: React.FC = () => {
           </Space>
         </div>
 
+        <div style={{ marginBottom: 16 }}>
+          <Input
+            placeholder="Search parameters by name, key, value, description, or tags..."
+            prefix={<SearchOutlined />}
+            value={searchText}
+            onChange={(e) => handleSearch(e.target.value)}
+            allowClear
+            style={{ maxWidth: 400 }}
+          />
+        </div>
+
         <Table
           columns={columns}
-          dataSource={parameters}
+          dataSource={filteredParameters}
           loading={loading}
           rowKey="id"
           pagination={{
@@ -244,6 +314,17 @@ const ParameterManager: React.FC = () => {
           layout="vertical"
           onFinish={handleSave}
         >
+          <Form.Item
+            name="name"
+            label="Parameter Name"
+            rules={[
+              { required: true, message: 'Please enter a parameter name' },
+              { max: 255, message: 'Name cannot exceed 255 characters' },
+            ]}
+          >
+            <Input placeholder="Enter parameter name" />
+          </Form.Item>
+
           <Form.Item
             name="key"
             label="Parameter Key"

@@ -9,6 +9,7 @@ export interface Tag {
 
 export interface Parameter {
   id: string;
+  name?: string;
   key: string;
   value: string | null;
   description: string | null;
@@ -39,6 +40,7 @@ export interface UpdateSolution {
 }
 
 export interface CreateParameter {
+  name?: string;
   key: string;
   value?: string;
   description?: string;
@@ -47,6 +49,7 @@ export interface CreateParameter {
 }
 
 export interface UpdateParameter {
+  name?: string;
   key?: string;
   value?: string;
   description?: string;

@@ -25,6 +25,7 @@ import {
   SettingOutlined,
   KeyOutlined,
   LockOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { api, Solution, CreateSolution, UpdateSolution, Parameter } from '../services/api.ts';
 
@@ -46,6 +47,8 @@ interface SolutionManagerProps {
 
 const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, onNavigateToSolution }) => {
   const [solutions, setSolutions] = useState<Solution[]>([]);
+  const [filteredSolutions, setFilteredSolutions] = useState<Solution[]>([]);
+  const [searchText, setSearchText] = useState('');
   const [allParameters, setAllParameters] = useState<Parameter[]>([]);
   const [selectedSolutionParams, setSelectedSolutionParams] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -83,11 +86,33 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     try {
       const response = await api.getSolutions();
       setSolutions(response.data);
+      setFilteredSolutions(response.data);
     } catch (error) {
       message.error('Failed to load solutions');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Filter solutions based on search text
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    if (!value.trim()) {
+      setFilteredSolutions(solutions);
+      return;
+    }
+
+    const filtered = solutions.filter(solution => {
+      const searchLower = value.toLowerCase();
+      const nameMatch = solution.name.toLowerCase().includes(searchLower);
+      const descMatch = solution.description?.toLowerCase().includes(searchLower);
+      const ownerMatch = solution.owner?.toLowerCase().includes(searchLower);
+      const emailMatch = solution.email?.toLowerCase().includes(searchLower);
+      
+      return nameMatch || descMatch || ownerMatch || emailMatch;
+    });
+    
+    setFilteredSolutions(filtered);
   };
 
   const loadAllParameters = async () => {
@@ -217,6 +242,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
       title: 'Name',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a: Solution, b: Solution) => a.name.localeCompare(b.name),
       render: (text: string, record: Solution) => (
         <Space direction="vertical" size={0}>
           <Text strong>{text}</Text>
@@ -232,6 +258,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
       title: 'Parameters',
       key: 'parameters',
       width: 120,
+      sorter: (a: Solution, b: Solution) => (a.parameter_count || 0) - (b.parameter_count || 0),
       render: (_, record: Solution) => (
         <Badge count={record.parameter_count || 0} showZero style={{ backgroundColor: '#1F86C9' }}>
           <SettingOutlined style={{ fontSize: '16px' }} />
@@ -243,6 +270,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
       dataIndex: 'created_at',
       key: 'created_at',
       width: 150,
+      sorter: (a: Solution, b: Solution) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
     {
@@ -321,9 +349,20 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
           </Space>
         </div>
 
+        <div style={{ marginBottom: 16 }}>
+          <Input
+            placeholder="Search solutions by name, description, owner, or email..."
+            prefix={<SearchOutlined />}
+            value={searchText}
+            onChange={(e) => handleSearch(e.target.value)}
+            allowClear
+            style={{ maxWidth: 400 }}
+          />
+        </div>
+
         <Table
           columns={columns}
-          dataSource={solutions}
+          dataSource={filteredSolutions}
           loading={loading}
           rowKey="id"
           pagination={{

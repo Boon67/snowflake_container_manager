@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Any, List
 from datetime import datetime
 
@@ -14,10 +14,11 @@ class Tag(TagBase):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Parameter Models ---
 class ParameterBase(BaseModel):
+    name: Optional[str] = Field(None, description="Parameter display name", max_length=255)
     key: str = Field(..., description="Parameter key", max_length=255)
     value: Optional[str] = Field(None, description="Parameter value")
     description: Optional[str] = Field(None, description="Parameter description", max_length=1000)
@@ -27,6 +28,7 @@ class ParameterCreate(ParameterBase):
     tags: Optional[List[str]] = Field(default=[], description="List of tag names to associate with the parameter")
 
 class ParameterUpdate(BaseModel):
+    name: Optional[str] = None
     key: Optional[str] = None
     value: Optional[str] = None
     description: Optional[str] = None
@@ -39,8 +41,20 @@ class Parameter(ParameterBase):
     updated_at: datetime
     tags: List[Tag] = []
 
-    class Config:
-        orm_mode = True
+    # Use Pydantic v2 approach
+    model_config = ConfigDict(
+        from_attributes=True,
+        validate_assignment=True,
+        extra='ignore'
+    )
+    
+    def model_dump(self, **kwargs):
+        """Override model_dump to ensure name field is always included"""
+        data = super().model_dump(**kwargs)
+        # Ensure name field is always present in the output
+        if 'name' not in data:
+            data['name'] = self.name
+        return data
 
 # --- Solution Models ---
 class SolutionBase(BaseModel):
@@ -62,7 +76,7 @@ class Solution(SolutionBase):
     parameter_count: Optional[int] = 0  # Add parameter count field
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- User Models ---
 class UserBase(BaseModel):
@@ -81,7 +95,7 @@ class User(UserBase):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserInDB(User):
     hashed_password: str
@@ -141,7 +155,7 @@ class ContainerService(ContainerServiceBase):
     dns_name: Optional[str] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ContainerServiceOperation(BaseModel):
     operation: str = Field(..., description="Operation type: 'start', 'stop', 'suspend', 'resume'")
@@ -156,4 +170,4 @@ class ComputePool(BaseModel):
     created_at: datetime
     
     class Config:
-        orm_mode = True 
+        from_attributes = True 
