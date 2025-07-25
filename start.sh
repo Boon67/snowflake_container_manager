@@ -5,29 +5,38 @@
 echo "🚀 Starting Configuration Manager..."
 
 # Check if required files exist
-if [ ! -f ".env" ]; then
-    echo "⚠️  .env file not found. Copying from .env.example..."
-    cp .env.example .env
-    echo "✅ Please edit .env file with your Snowflake credentials before running again."
+if [ ! -f "backend/.env" ]; then
+    echo "⚠️  backend/.env file not found. Copying from .env.example..."
+    if [ -f ".env.example" ]; then
+        cp .env.example backend/.env
+    else
+        echo "❌ .env.example file not found. Please create backend/.env manually."
+        exit 1
+    fi
+    echo "✅ Please edit backend/.env file with your Snowflake credentials before running again."
     exit 1
 fi
 
 # Create virtual environment if it doesn't exist
-if [ ! -d ".venv" ]; then
+if [ ! -d "backend/.venv" ]; then
     echo "🐍 Creating Python virtual environment..."
+    cd backend
     python3 -m venv .venv
-    echo "✅ Virtual environment created at .venv/"
+    cd ..
+    echo "✅ Virtual environment created at backend/.venv/"
 fi
 
 # Activate virtual environment
 echo "🔧 Activating virtual environment..."
-source .venv/bin/activate
+source backend/.venv/bin/activate
 
 # Check if Python dependencies are installed
 if ! python -c "import fastapi" &> /dev/null; then
     echo "📦 Installing Python dependencies..."
+    cd backend
     pip install --upgrade pip
     pip install -r requirements.txt
+    cd ..
 fi
 
 # Check if Node.js dependencies are installed
@@ -40,8 +49,10 @@ fi
 
 echo "🔧 Starting backend server..."
 # Start backend in background (with virtual environment activated)
-python main.py &
+cd backend
+python3 main.py &
 BACKEND_PID=$!
+cd ..
 
 # Wait a bit for backend to start
 sleep 3

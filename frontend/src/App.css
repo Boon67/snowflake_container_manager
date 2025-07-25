@@ -2,71 +2,357 @@
   text-align: center;
 }
 
-.login-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+/* Snowflake-inspired theme colors */
+:root {
+  --snowflake-primary: #1F86C9;
+  --snowflake-secondary: #0066CC;
+  --snowflake-accent: #4DB8E8;
+  --snowflake-light-blue: #E8F4FD;
+  --snowflake-dark-blue: #0D4F8C;
+  --snowflake-white: #FFFFFF;
+  --snowflake-light-gray: #F8F9FA;
+  --snowflake-gray: #6C757D;
+  --snowflake-dark-gray: #212529;
+  --snowflake-border: #DEE2E6;
+  --snowflake-hover: #E3F2FD;
 }
 
-.login-form {
-  background: white;
-  padding: 40px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  width: 100%;
-  max-width: 400px;
+/* Snowflake theme overrides for Ant Design components */
+.ant-layout {
+  background: var(--snowflake-white) !important;
 }
 
-.login-form h2 {
-  text-align: center;
-  margin-bottom: 30px;
-  color: #333;
+.ant-layout-sider {
+  background: var(--snowflake-dark-blue) !important;
+  border-right: 1px solid var(--snowflake-border) !important;
 }
 
-.dashboard-header {
-  background: #fff;
-  padding: 20px;
-  border-bottom: 1px solid #f0f0f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.ant-layout-header {
+  background: var(--snowflake-white) !important;
+  border-bottom: 2px solid var(--snowflake-primary) !important;
+  box-shadow: 0 2px 8px rgba(31, 134, 201, 0.1) !important;
 }
 
-.dashboard-content {
-  padding: 24px;
-  background: #f5f5f5;
-  min-height: calc(100vh - 64px);
+.ant-layout-content {
+  background: var(--snowflake-light-gray) !important;
 }
 
-.config-section {
-  background: white;
-  border-radius: 8px;
-  margin-bottom: 24px;
+.ant-menu {
+  background: var(--snowflake-dark-blue) !important;
+  border: none !important;
 }
 
-.config-table {
-  margin-top: 16px;
+.ant-menu-item {
+  color: var(--snowflake-white) !important;
+  border-radius: 6px !important;
+  margin: 4px 8px !important;
+}
+
+.ant-menu-item:hover {
+  color: var(--snowflake-white) !important;
+  background: var(--snowflake-primary) !important;
+}
+
+.ant-menu-item-selected {
+  background: var(--snowflake-primary) !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-menu-item-selected a {
+  color: var(--snowflake-white) !important;
+}
+
+.ant-card {
+  background: var(--snowflake-white) !important;
+  border: 1px solid var(--snowflake-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+}
+
+.ant-card-head {
+  background: var(--snowflake-white) !important;
+  border-bottom: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-card-head-title {
+  color: var(--snowflake-dark-gray) !important;
+  font-weight: 600 !important;
+}
+
+.ant-card-body {
+  background: var(--snowflake-white) !important;
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-statistic-title {
+  color: var(--snowflake-gray) !important;
+  font-weight: 500 !important;
+}
+
+.ant-statistic-content-value {
+  color: var(--snowflake-dark-gray) !important;
+  font-weight: 600 !important;
+}
+
+.ant-table {
+  background: var(--snowflake-white) !important;
+  border-radius: 8px !important;
 }
 
 .ant-table-thead > tr > th {
-  background-color: #fafafa;
-  font-weight: 600;
+  background: var(--snowflake-light-blue) !important;
+  border-bottom: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-blue) !important;
+  font-weight: 600 !important;
 }
 
-.add-button {
-  margin-bottom: 16px;
+.ant-table-tbody > tr > td {
+  background: var(--snowflake-white) !important;
+  border-bottom: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
 }
 
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 24px;
+.ant-table-tbody > tr:hover > td {
+  background: var(--snowflake-hover) !important;
 }
 
-.welcome-text {
-  color: #666;
-  margin-right: 16px;
+.ant-form-item-label > label {
+  color: var(--snowflake-dark-gray) !important;
+  font-weight: 500 !important;
+}
+
+.ant-input {
+  background: var(--snowflake-white) !important;
+  border: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
+  border-radius: 6px !important;
+}
+
+.ant-input:hover {
+  border-color: var(--snowflake-primary) !important;
+}
+
+.ant-input:focus {
+  border-color: var(--snowflake-primary) !important;
+  box-shadow: 0 0 0 2px rgba(31, 134, 201, 0.2) !important;
+}
+
+.ant-input-password {
+  background: var(--snowflake-white) !important;
+  border: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
+  border-radius: 6px !important;
+}
+
+.ant-select {
+  background: var(--snowflake-white) !important;
+}
+
+.ant-select-selector {
+  background: var(--snowflake-white) !important;
+  border: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
+  border-radius: 6px !important;
+}
+
+.ant-select-arrow {
+  color: var(--snowflake-gray) !important;
+}
+
+.ant-btn {
+  border-radius: 6px !important;
+  font-weight: 500 !important;
+  border: 1px solid var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-btn:hover {
+  border-color: var(--snowflake-primary) !important;
+  color: var(--snowflake-primary) !important;
+}
+
+.ant-btn-primary {
+  background: var(--snowflake-primary) !important;
+  border-color: var(--snowflake-primary) !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-btn-primary:hover {
+  background: var(--snowflake-secondary) !important;
+  border-color: var(--snowflake-secondary) !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-modal-content {
+  background: var(--snowflake-white) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 16px 48px rgba(31, 134, 201, 0.15) !important;
+}
+
+.ant-modal-header {
+  background: var(--snowflake-white) !important;
+  border-bottom: 1px solid var(--snowflake-border) !important;
+  border-radius: 12px 12px 0 0 !important;
+}
+
+.ant-modal-title {
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-modal-body {
+  background: var(--snowflake-white) !important;
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-modal-footer {
+  background: var(--snowflake-white) !important;
+  border-top: 1px solid var(--snowflake-border) !important;
+  border-radius: 0 0 12px 12px !important;
+}
+
+.ant-tag {
+  background: var(--snowflake-light-blue) !important;
+  border: 1px solid var(--snowflake-accent) !important;
+  color: var(--snowflake-dark-blue) !important;
+  border-radius: 4px !important;
+}
+
+.ant-tag-blue {
+  background: var(--snowflake-primary) !important;
+  border-color: var(--snowflake-primary) !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-tag-green {
+  background: #52c41a !important;
+  border-color: #52c41a !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-tag-orange {
+  background: #faad14 !important;
+  border-color: #faad14 !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-tag-red {
+  background: #f5222d !important;
+  border-color: #f5222d !important;
+  color: var(--snowflake-white) !important;
+}
+
+.ant-dropdown {
+  background: var(--snowflake-white) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(31, 134, 201, 0.15) !important;
+}
+
+.ant-dropdown-menu {
+  background: var(--snowflake-white) !important;
+  border: 1px solid var(--snowflake-border) !important;
+  border-radius: 8px !important;
+}
+
+.ant-dropdown-menu-item {
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-dropdown-menu-item:hover {
+  background: var(--snowflake-hover) !important;
+}
+
+.ant-dropdown-menu-item-disabled {
+  color: var(--snowflake-gray) !important;
+}
+
+.ant-message {
+  z-index: 9999 !important;
+}
+
+/* Custom Snowflake-inspired scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--snowflake-light-gray);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--snowflake-primary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--snowflake-secondary);
+}
+
+/* Loading spinner override */
+.ant-spin-dot-item {
+  background-color: var(--snowflake-primary) !important;
+}
+
+/* Empty state styling */
+.ant-empty {
+  color: var(--snowflake-gray) !important;
+}
+
+.ant-empty-description {
+  color: var(--snowflake-gray) !important;
+}
+
+/* Snowflake logo animation */
+@keyframes snowflake-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(31, 134, 201, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(31, 134, 201, 0.6));
+  }
+}
+
+.snowflake-logo {
+  animation: snowflake-glow 3s ease-in-out infinite;
+}
+
+/* Professional gradient backgrounds */
+.snowflake-gradient-primary {
+  background: linear-gradient(135deg, var(--snowflake-primary) 0%, var(--snowflake-secondary) 100%) !important;
+}
+
+.snowflake-gradient-light {
+  background: linear-gradient(135deg, var(--snowflake-light-blue) 0%, var(--snowflake-white) 100%) !important;
+}
+
+/* Typography improvements */
+.ant-typography h1,
+.ant-typography h2,
+.ant-typography h3,
+.ant-typography h4,
+.ant-typography h5 {
+  color: var(--snowflake-dark-gray) !important;
+  font-weight: 600 !important;
+}
+
+/* Button variants */
+.ant-btn-default {
+  background: var(--snowflake-white) !important;
+  border-color: var(--snowflake-border) !important;
+  color: var(--snowflake-dark-gray) !important;
+}
+
+.ant-btn-default:hover {
+  background: var(--snowflake-hover) !important;
+  border-color: var(--snowflake-primary) !important;
+  color: var(--snowflake-primary) !important;
+}
+
+/* Focus states */
+.ant-input:focus,
+.ant-select-focused .ant-select-selector,
+.ant-btn:focus {
+  outline: 2px solid rgba(31, 134, 201, 0.2) !important;
+  outline-offset: 2px !important;
 } 

@@ -1,38 +1,42 @@
 #!/bin/bash
 
-# Development script for running just the backend server
-# Useful for developers who want to run frontend separately
+# Unified Solution Configuration Manager - Development Backend Script
+# This script starts only the backend server for development
 
-echo "🔧 Starting Configuration Manager Backend (Development Mode)..."
+set -e  # Exit on any error
 
-# Check if virtual environment exists
-if [ ! -d ".venv" ]; then
-    echo "❌ Virtual environment not found. Please run ./setup.sh first."
-    exit 1
-fi
-
-# Check if .env exists
-if [ ! -f ".env" ]; then
-    echo "❌ .env file not found. Please run ./setup.sh first."
-    exit 1
-fi
-
-# Activate virtual environment
-echo "🐍 Activating virtual environment..."
-source .venv/bin/activate
-
-# Check if dependencies are installed
-if ! python -c "import fastapi" &> /dev/null; then
-    echo "📦 Installing missing dependencies..."
-    pip install --upgrade pip
-    pip install -r requirements.txt
-fi
-
-echo "🚀 Starting backend server..."
-echo "📊 Backend API: http://localhost:8000"
-echo "📚 API Docs: http://localhost:8000/docs"
-echo "💡 Press Ctrl+C to stop the server"
+echo "🚀 Starting Configuration Manager Backend (Development Mode)..."
 echo ""
 
-# Start the backend server
-python main.py 
+# Check if virtual environment exists
+if [ ! -d "backend/.venv" ]; then
+    echo "❌ Virtual environment not found in backend/.venv. Please run ./setup.sh first."
+    exit 1
+fi
+
+# Check if .env file exists
+if [ ! -f "backend/.env" ]; then
+    echo "❌ .env file not found in backend/. Please run ./setup.sh first."
+    exit 1
+fi
+
+echo "🐍 Activating virtual environment..."
+source backend/.venv/bin/activate
+
+echo "⚙️ Loading environment variables..."
+export $(cat backend/.env | grep -v '^#' | xargs)
+
+echo "🔧 Starting FastAPI backend server..."
+echo "📡 Backend will be available at: http://localhost:8000"
+echo "📚 API Documentation at: http://localhost:8000/docs"
+echo "🛑 Press Ctrl+C to stop the server"
+echo ""
+
+# Start the backend server with auto-reload for development
+cd backend
+python main.py
+cd ..
+
+echo ""
+echo "👋 Backend server stopped."
+deactivate 

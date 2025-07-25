@@ -29,7 +29,7 @@ MANIFEST
 .env.production.local
 
 # Secrets and private keys
-secrets/
+
 !secrets/README.md
 
 # Virtual environments
@@ -87,3 +87,4 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/ 
+secrets/rsa_private_key.pem
