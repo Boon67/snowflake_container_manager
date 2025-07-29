@@ -1773,6 +1773,8 @@ async def get_warehouse_credit_usage_summary(
         return {"success": True, "data": summary}
     except Exception as e:
         logger.error(f"Error getting warehouse credit usage summary: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to retrieve warehouse credit usage summary")
 
 # Storage Analytics Endpoints
@@ -1805,6 +1807,8 @@ async def get_storage_usage(
         return {"success": True, "data": storage_usage}
     except Exception as e:
         logger.error(f"Error getting storage usage: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to retrieve storage usage data")
 
 @app.post("/api/analytics/storage-usage-summary")
@@ -1833,6 +1837,8 @@ async def get_storage_usage_summary(
         return {"success": True, "data": summary}
     except Exception as e:
         logger.error(f"Error getting storage usage summary: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to retrieve storage usage summary")
 
 @app.post("/api/analytics/database-storage-usage")

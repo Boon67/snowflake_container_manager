@@ -252,7 +252,7 @@ class ApiService {
   constructor() {
     this.axiosInstance = axios.create({
       baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api',
-      timeout: 10000,
+      timeout: 30000, // Increased to 30 seconds for storage queries
       headers: {
         'Content-Type': 'application/json',
       },

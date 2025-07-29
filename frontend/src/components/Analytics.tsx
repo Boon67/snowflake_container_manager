@@ -167,7 +167,7 @@ const Analytics: React.FC = () => {
         api.getDatabaseStorageUsage(filter),
         api.getStorageUsageSummary(filter),
       ]);
-
+      
       setStorageUsage(storageResponse.data.data); // Extract nested data from {success: true, data: [...]}
       setDatabaseStorageUsage(databaseStorageResponse.data.data); // Extract nested data from {success: true, data: [...]}
       setStorageSummary(storageSummaryResponse.data.data); // Extract nested data from {success: true, data: {...}}
@@ -327,6 +327,8 @@ const Analytics: React.FC = () => {
 
   // Prepare data for storage usage time series chart
   const prepareStorageTimeSeriesData = () => {
+
+    
     const groupedData: Record<string, any> = {};
     
     // Determine date format and aggregation based on period
@@ -361,9 +363,13 @@ const Analytics: React.FC = () => {
       groupedData[dateKey].hybrid_gb += item.hybrid_table_storage_bytes / bytesToGB;
     });
 
-    return Object.values(groupedData).sort((a: any, b: any) => 
+    const result = Object.values(groupedData).sort((a: any, b: any) => 
       dayjs(a.date).unix() - dayjs(b.date).unix()
     );
+    
+
+    
+    return result;
   };
 
   // Prepare data for database storage time series chart
@@ -494,67 +500,67 @@ const Analytics: React.FC = () => {
         {/* Summary Statistics */}
         <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
           <Col xs={24} sm={4}>
-            <Card>
+            <Card style={{ backgroundColor: (loading || warehouseLoading) ? '#f5f5f5' : undefined }}>
               <Statistic
                 title="Total Credits Used"
-                value={(summary?.total_credits_used || 0) + (warehouseSummary?.total_credits_used || 0)}
+                value={(loading || warehouseLoading) ? '---' : (summary?.total_credits_used || 0) + (warehouseSummary?.total_credits_used || 0)}
                 precision={2}
-                prefix={<DollarOutlined style={{ color: '#52c41a' }} />}
-                suffix="credits"
+                prefix={<DollarOutlined style={{ color: (loading || warehouseLoading) ? '#d9d9d9' : '#52c41a' }} />}
+                suffix={(loading || warehouseLoading) ? '' : 'credits'}
               />
             </Card>
           </Col>
           <Col xs={24} sm={4}>
-            <Card>
+            <Card style={{ backgroundColor: (loading || warehouseLoading) ? '#f5f5f5' : undefined }}>
               <Statistic
                 title="Average Credits per Day"
-                value={(() => {
+                value={(loading || warehouseLoading) ? '---' : (() => {
                   if (!dateRange || !dateRange[0] || !dateRange[1]) return 0;
                   const totalCredits = (summary?.total_credits_used || 0) + (warehouseSummary?.total_credits_used || 0);
                   const daysDiff = dateRange[1].diff(dateRange[0], 'days') + 1; // +1 to include both start and end days
                   return daysDiff > 0 ? totalCredits / daysDiff : 0;
                 })()}
                 precision={2}
-                prefix={<DollarOutlined style={{ color: '#faad14' }} />}
-                suffix="credits/day"
+                prefix={<DollarOutlined style={{ color: (loading || warehouseLoading) ? '#d9d9d9' : '#faad14' }} />}
+                suffix={(loading || warehouseLoading) ? '' : 'credits/day'}
               />
             </Card>
           </Col>
           <Col xs={24} sm={4}>
-            <Card>
+            <Card style={{ backgroundColor: storageLoading ? '#f5f5f5' : undefined }}>
               <Statistic
                 title="Total Storage"
-                value={storageSummary?.total_storage_gb || 0}
+                value={storageLoading ? '---' : storageSummary?.total_storage_gb || 0}
                 precision={1}
-                prefix={<CloudServerOutlined style={{ color: '#f56a00' }} />}
-                suffix="GB"
+                prefix={<CloudServerOutlined style={{ color: storageLoading ? '#d9d9d9' : '#f56a00' }} />}
+                suffix={storageLoading ? '' : 'GB'}
               />
             </Card>
           </Col>
           <Col xs={24} sm={4}>
-            <Card>
+            <Card style={{ backgroundColor: loading ? '#f5f5f5' : undefined }}>
               <Statistic
                 title="Active Compute Pools"
-                value={uniquePools.length}
-                prefix={<CloudServerOutlined style={{ color: '#1890ff' }} />}
+                value={loading ? '---' : uniquePools.length}
+                prefix={<CloudServerOutlined style={{ color: loading ? '#d9d9d9' : '#1890ff' }} />}
               />
             </Card>
           </Col>
           <Col xs={24} sm={4}>
-            <Card>
+            <Card style={{ backgroundColor: warehouseLoading ? '#f5f5f5' : undefined }}>
               <Statistic
                 title="Active Warehouses"
-                value={uniqueWarehouses.length}
-                prefix={<CloudServerOutlined style={{ color: '#722ed1' }} />}
+                value={warehouseLoading ? '---' : uniqueWarehouses.length}
+                prefix={<CloudServerOutlined style={{ color: warehouseLoading ? '#d9d9d9' : '#722ed1' }} />}
               />
             </Card>
           </Col>
           <Col xs={24} sm={4}>
-            <Card>
+            <Card style={{ backgroundColor: storageLoading ? '#f5f5f5' : undefined }}>
               <Statistic
                 title="Active Databases"
-                value={storageSummary?.active_databases || 0}
-                prefix={<CloudServerOutlined style={{ color: '#13c2c2' }} />}
+                value={storageLoading ? '---' : storageSummary?.active_databases || 0}
+                prefix={<CloudServerOutlined style={{ color: storageLoading ? '#d9d9d9' : '#13c2c2' }} />}
               />
             </Card>
           </Col>

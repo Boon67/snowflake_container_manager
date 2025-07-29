@@ -152,6 +152,34 @@ class SnowflakeConnection:
             rows = self.cursor.fetchall()
             
             return [dict(zip(columns, row)) for row in rows]
+        except snowflake.connector.errors.ProgrammingError as e:
+            # Check if it's an authentication error
+            if "Authentication token has expired" in str(e) or "08001" in str(e):
+                logger.warning("🔄 Authentication token expired, reconnecting...")
+                try:
+                    # Reconnect to Snowflake
+                    self.disconnect()
+                    if self.connect():
+                        logger.info("✅ Successfully reconnected to Snowflake")
+                        # Retry the query
+                        if params:
+                            self.cursor.execute(query, params)
+                        else:
+                            self.cursor.execute(query)
+                        
+                        columns = [desc[0] for desc in self.cursor.description]
+                        rows = self.cursor.fetchall()
+                        
+                        return [dict(zip(columns, row)) for row in rows]
+                    else:
+                        logger.error("❌ Failed to reconnect to Snowflake")
+                        raise
+                except Exception as reconnect_error:
+                    logger.error(f"❌ Error during reconnection: {reconnect_error}")
+                    raise
+            else:
+                # Re-raise the original error if it's not authentication-related
+                raise
             
         except Exception as e:
             logger.error(f"Error executing query: {e}")
@@ -1073,7 +1101,7 @@ class SnowflakeConnection:
             "monthly": "MONTH"
         }.get(period_type, "MONTH")
         
-        # Query Storage Usage for account-wide storage data
+        # Query Storage Usage for account-wide storage data (optimized with LIMIT)
         query = f"""
         SELECT 
             DATE_TRUNC('{date_trunc_format}', USAGE_DATE) AS USAGE_DATE,
@@ -1086,6 +1114,7 @@ class SnowflakeConnection:
             AND USAGE_DATE <= %s
         GROUP BY DATE_TRUNC('{date_trunc_format}', USAGE_DATE)
         ORDER BY USAGE_DATE DESC
+        LIMIT 100
         """
         
         try:
@@ -1139,7 +1168,7 @@ class SnowflakeConnection:
             database_list = "','".join(database_names)
             database_filter = f"AND DATABASE_NAME IN ('{database_list}')"
         
-        # Query Database Storage Usage History for per-database storage data
+        # Query Database Storage Usage History for per-database storage data (optimized)
         query = f"""
         SELECT 
             DATABASE_NAME,
@@ -1155,6 +1184,7 @@ class SnowflakeConnection:
             {database_filter}
         GROUP BY DATABASE_NAME, DATE_TRUNC('{date_trunc_format}', USAGE_DATE)
         ORDER BY USAGE_DATE DESC, DATABASE_NAME
+        LIMIT 500
         """
         
         try:
