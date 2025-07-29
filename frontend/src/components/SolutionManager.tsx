@@ -9,13 +9,17 @@ import {
   message,
   Popconfirm,
   Typography,
-  Card,
   Tooltip,
   Badge,
   Tabs,
   Transfer,
   Tag as AntTag,
+  Checkbox,
+  Select,
+  Dropdown,
+  Menu,
 } from 'antd';
+import { Card } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -26,12 +30,28 @@ import {
   KeyOutlined,
   LockOutlined,
   SearchOutlined,
+  DownloadOutlined,
+  CopyOutlined,
+  StopOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
-import { api, Solution, CreateSolution, UpdateSolution, Parameter } from '../services/api.ts';
+import { 
+  api, 
+  Solution, 
+  CreateSolution, 
+  UpdateSolution, 
+  Parameter, 
+  CreateParameter, 
+  Tag,
+  SolutionAPIKeyList,
+  CreateSolutionAPIKey,
+  SolutionAPIKeyResponse
+} from '../services/api.ts';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { TabPane } = Tabs;
+const { Item: MenuItem } = Menu;
 
 interface TransferItem {
   key: string;
@@ -57,10 +77,21 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const [form] = Form.useForm();
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [parameterLoading, setParameterLoading] = useState(false);
+  const [parameterModalVisible, setParameterModalVisible] = useState(false);
+  const [parameterForm] = Form.useForm();
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  
+  // API Key management state
+  const [apiKeys, setApiKeys] = useState<SolutionAPIKeyList[]>([]);
+  const [apiKeyModalVisible, setApiKeyModalVisible] = useState(false);
+  const [apiKeyForm] = Form.useForm();
+  const [newApiKey, setNewApiKey] = useState<SolutionAPIKeyResponse | null>(null);
 
   useEffect(() => {
     loadSolutions();
     loadAllParameters();
+    loadAllTags();
   }, []);
 
   // Handle navigation to specific solution
@@ -133,6 +164,15 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     }
   };
 
+  const loadAllTags = async () => {
+    try {
+      const response = await api.getTags();
+      setAllTags(response.data);
+    } catch (error) {
+      message.error('Failed to load tags');
+    }
+  };
+
   const handleCreate = () => {
     setEditingSolution(null);
     setSelectedSolutionParams([]);
@@ -147,6 +187,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
       description: solution.description,
     });
     await loadSolutionParameters(solution.id);
+    await loadApiKeys(solution.id);
     setModalVisible(true);
   };
 
@@ -215,6 +256,118 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     }
   };
 
+  const handleCreateParameter = () => {
+    setSelectedTags([]);
+    parameterForm.resetFields();
+    setParameterModalVisible(true);
+  };
+
+  const handleSaveParameter = async (values: any) => {
+    try {
+      // Convert tag IDs to tag names for the API
+      const tagNames = selectedTags.map(tagId => {
+        const tag = allTags.find(t => t.id === tagId);
+        return tag ? tag.name : tagId;
+      });
+
+      const parameterData: CreateParameter = {
+        name: values.name,
+        key: values.key,
+        value: values.value,
+        description: values.description || '',
+        is_secret: values.is_secret || false,
+        tags: tagNames,
+      };
+
+      const response = await api.createParameter(parameterData);
+      message.success('Parameter created successfully');
+      
+      // The backend returns the parameter with proper tag objects, so we can use it directly
+      const newParameter = response.data;
+      
+      // Add the new parameter to the available parameters list
+      setAllParameters(prev => [...prev, newParameter]);
+      
+      // Automatically select the new parameter for this solution
+      setSelectedSolutionParams(prev => [...prev, response.data.id]);
+      
+      setParameterModalVisible(false);
+      parameterForm.resetFields();
+      setSelectedTags([]);
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to create parameter');
+    }
+  };
+
+  const handleExportSolution = async (solution: Solution, format: string) => {
+    try {
+      await api.exportSolutionConfig(solution.id, format);
+      message.success(`Solution configuration exported as ${format.toUpperCase()}`);
+    } catch (error: any) {
+      message.error('Failed to export solution configuration');
+    }
+  };
+
+  const loadApiKeys = async (solutionId: string) => {
+    try {
+      const response = await api.getSolutionAPIKeys(solutionId);
+      setApiKeys(response.data);
+    } catch (error: any) {
+      message.error('Failed to load API keys');
+    }
+  };
+
+  const handleCreateApiKey = async (values: any) => {
+    if (!editingSolution) return;
+    
+    try {
+      const response = await api.createSolutionAPIKey(editingSolution.id, {
+        key_name: values.key_name,
+        expires_days: values.expires_days || undefined
+      });
+      
+      setNewApiKey(response.data);
+      setApiKeyModalVisible(false);
+      apiKeyForm.resetFields();
+      await loadApiKeys(editingSolution.id);
+      message.success('API key created successfully');
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to create API key');
+    }
+  };
+
+  const handleDeleteApiKey = async (apiKeyId: string) => {
+    if (!editingSolution) return;
+    
+    try {
+      await api.deleteSolutionAPIKey(editingSolution.id, apiKeyId);
+      await loadApiKeys(editingSolution.id);
+      message.success('API key deleted successfully');
+    } catch (error: any) {
+      message.error('Failed to delete API key');
+    }
+  };
+
+  const handleToggleApiKey = async (apiKeyId: string, isActive: boolean) => {
+    if (!editingSolution) return;
+    
+    try {
+      await api.toggleSolutionAPIKey(editingSolution.id, apiKeyId, isActive);
+      await loadApiKeys(editingSolution.id);
+      message.success(`API key ${isActive ? 'enabled' : 'disabled'} successfully`);
+    } catch (error: any) {
+      message.error('Failed to update API key');
+    }
+  };
+
+  const copyToClipboard = (text: string, description: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      message.success(`${description} copied to clipboard!`);
+    }).catch(() => {
+      message.error('Failed to copy to clipboard');
+    });
+  };
+
   const renderParameterItem = (param: Parameter) => ({
     key: param.id,
     title: (
@@ -276,53 +429,80 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     {
       title: 'Actions',
       key: 'actions',
-      width: 150,
-      render: (_, record: Solution) => (
-        <Space>
-          <Tooltip title="View Details">
-            <Button
-              type="text"
-              icon={<EyeOutlined />}
-              onClick={() => handleEdit(record)}
-            />
-          </Tooltip>
-          <Tooltip title="Edit">
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
-            />
-          </Tooltip>
-          <Popconfirm
-            title="Delete Solution"
-            description={
-              (record.parameter_count || 0) > 0
-                ? `This solution has ${record.parameter_count || 0} parameters. Delete all parameters first.`
-                : 'Are you sure you want to delete this solution?'
-            }
-            onConfirm={() => handleDelete(record)}
-            okText="Yes"
-            cancelText="No"
-            disabled={(record.parameter_count || 0) > 0}
-          >
-            <Tooltip 
-              title={
-                (record.parameter_count || 0) > 0 
-                  ? 'Cannot delete: solution has parameters' 
-                  : 'Delete'
-              }
-            >
+      width: 200,
+      render: (_, record: Solution) => {
+        const exportMenu = (
+          <Menu>
+            <MenuItem key="json" onClick={() => handleExportSolution(record, 'json')}>
+              <span>JSON Configuration</span>
+            </MenuItem>
+            <MenuItem key="yaml" onClick={() => handleExportSolution(record, 'yaml')}>
+              <span>YAML Configuration</span>
+            </MenuItem>
+            <MenuItem key="env" onClick={() => handleExportSolution(record, 'env')}>
+              <span>Environment Variables</span>
+            </MenuItem>
+            <MenuItem key="properties" onClick={() => handleExportSolution(record, 'properties')}>
+              <span>Java Properties</span>
+            </MenuItem>
+          </Menu>
+        );
+
+        return (
+          <Space>
+            <Tooltip title="View Details">
               <Button
                 type="text"
-                danger
-                icon={<DeleteOutlined />}
-                loading={deleteLoading === record.id}
-                disabled={(record.parameter_count || 0) > 0}
+                icon={<EyeOutlined />}
+                onClick={() => handleEdit(record)}
               />
             </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
+            <Tooltip title="Edit">
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
+              />
+            </Tooltip>
+            <Dropdown overlay={exportMenu} trigger={['click']}>
+              <Tooltip title="Download Configuration">
+                <Button
+                  type="text"
+                  icon={<DownloadOutlined />}
+                />
+              </Tooltip>
+            </Dropdown>
+            <Popconfirm
+              title="Delete Solution"
+              description={
+                (record.parameter_count || 0) > 0
+                  ? `This solution has ${record.parameter_count || 0} parameters. Delete all parameters first.`
+                  : 'Are you sure you want to delete this solution?'
+              }
+              onConfirm={() => handleDelete(record)}
+              okText="Yes"
+              cancelText="No"
+              disabled={(record.parameter_count || 0) > 0}
+            >
+              <Tooltip 
+                title={
+                  (record.parameter_count || 0) > 0 
+                    ? 'Cannot delete: solution has parameters' 
+                    : 'Delete'
+                }
+              >
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={deleteLoading === record.id}
+                  disabled={(record.parameter_count || 0) > 0}
+                />
+              </Tooltip>
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -415,9 +595,19 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
             
             <TabPane tab="Parameters" key="parameters">
               <div style={{ marginBottom: 16 }}>
-                <Text type="secondary">
-                  Select parameters to associate with this solution. Parameters can be shared across multiple solutions.
-                </Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                  <Text type="secondary">
+                    Select parameters to associate with this solution. Parameters can be shared across multiple solutions.
+                  </Text>
+                  <Button 
+                    type="primary" 
+                    icon={<PlusOutlined />} 
+                    onClick={handleCreateParameter}
+                    size="small"
+                  >
+                    Create New Parameter
+                  </Button>
+                </div>
               </div>
               
               <Transfer
@@ -435,6 +625,144 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
                 }}
               />
             </TabPane>
+            
+            <TabPane tab="API Keys" key="api-keys">
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                  <Text type="secondary">
+                    Generate API keys for third-party application access to this solution's configuration.
+                  </Text>
+                  <Button 
+                    type="primary" 
+                    icon={<PlusOutlined />} 
+                    onClick={() => setApiKeyModalVisible(true)}
+                    size="small"
+                  >
+                    Generate API Key
+                  </Button>
+                </div>
+              </div>
+              
+              <Table
+                dataSource={apiKeys}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={[
+                  {
+                    title: 'Name',
+                    dataIndex: 'key_name',
+                    key: 'key_name',
+                  },
+                  {
+                    title: 'API Key',
+                    dataIndex: 'api_key_preview',
+                    key: 'api_key_preview',
+                    render: (preview: string) => (
+                      <Text code style={{ fontSize: '12px' }}>{preview}</Text>
+                    ),
+                  },
+                  {
+                    title: 'Status',
+                    dataIndex: 'is_active',
+                    key: 'is_active',
+                    render: (isActive: boolean) => (
+                      <Badge 
+                        status={isActive ? 'success' : 'error'} 
+                        text={isActive ? 'Active' : 'Disabled'} 
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Created',
+                    dataIndex: 'created_at',
+                    key: 'created_at',
+                    render: (date: string) => date ? new Date(date).toLocaleDateString() : '-',
+                  },
+                  {
+                    title: 'Last Used',
+                    dataIndex: 'last_used',
+                    key: 'last_used',
+                    render: (date: string) => date ? new Date(date).toLocaleDateString() : 'Never',
+                  },
+                  {
+                    title: 'Actions',
+                    key: 'actions',
+                    render: (_, record: SolutionAPIKeyList) => (
+                      <Space>
+                        <Tooltip title={record.is_active ? 'Disable' : 'Enable'}>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={record.is_active ? <StopOutlined /> : <PlayCircleOutlined />}
+                            onClick={() => handleToggleApiKey(record.id, !record.is_active)}
+                          />
+                        </Tooltip>
+                        <Popconfirm
+                          title="Delete API Key"
+                          description="Are you sure you want to delete this API key? This action cannot be undone."
+                          onConfirm={() => handleDeleteApiKey(record.id)}
+                          okText="Yes"
+                          cancelText="No"
+                        >
+                          <Tooltip title="Delete">
+                            <Button
+                              type="text"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                            />
+                          </Tooltip>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+              
+              {/* Show copy-paste URLs if there are active API keys */}
+              {apiKeys.filter(key => key.is_active).length > 0 && (
+                <div style={{ marginTop: 24, padding: 16, backgroundColor: '#f9f9f9', borderRadius: 6 }}>
+                  <Title level={5}>Third-Party Access URLs</Title>
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                    Use these URLs in your applications to fetch configuration without authentication:
+                  </Text>
+                  
+                  {apiKeys.filter(key => key.is_active).map(key => (
+                    <div key={key.id} style={{ marginBottom: 16 }}>
+                      <Text strong>{key.key_name}</Text>
+                      {['json', 'yaml', 'env', 'properties'].map(format => {
+                        const apiKey = key.api_key_preview.replace('...', ''); // This would need the full key
+                        const url = `${window.location.origin}/api/public/solutions/config?api_key=YOUR_FULL_API_KEY&format=${format}`;
+                        return (
+                          <div key={format} style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Text type="secondary" style={{ minWidth: 80 }}>{format.toUpperCase()}:</Text>
+                            <Input 
+                              size="small"
+                              value={url}
+                              readOnly
+                              style={{ fontSize: '12px' }}
+                            />
+                            <Tooltip title={`Copy ${format.toUpperCase()} URL`}>
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<CopyOutlined />}
+                                onClick={() => copyToClipboard(url, `${format.toUpperCase()} URL`)}
+                              />
+                            </Tooltip>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  
+                  <Text type="warning" style={{ fontSize: '12px', display: 'block', marginTop: 12 }}>
+                    ⚠️ Replace "YOUR_FULL_API_KEY" with the actual API key from the generation response.
+                  </Text>
+                </div>
+              )}
+            </TabPane>
           </Tabs>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
@@ -449,6 +777,240 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Parameter Creation Modal */}
+      <Modal
+        title="Create New Parameter"
+        open={parameterModalVisible}
+        onCancel={() => setParameterModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <Form
+          form={parameterForm}
+          layout="vertical"
+          onFinish={handleSaveParameter}
+        >
+          <Form.Item
+            name="name"
+            label="Parameter Name"
+            rules={[
+              { max: 255, message: 'Name cannot exceed 255 characters' },
+            ]}
+          >
+            <Input placeholder="Enter a friendly name for this parameter (optional)" />
+          </Form.Item>
+
+          <Form.Item
+            name="key"
+            label="Parameter Key"
+            rules={[
+              { required: true, message: 'Please enter a parameter key' },
+              { max: 255, message: 'Key cannot exceed 255 characters' },
+            ]}
+          >
+            <Input placeholder="Enter parameter key (e.g., DATABASE_URL)" />
+          </Form.Item>
+
+          <Form.Item
+            name="value"
+            label="Parameter Value"
+            rules={[
+              { max: 1000, message: 'Value cannot exceed 1000 characters' },
+            ]}
+          >
+            <Input placeholder="Enter parameter value (optional)" />
+          </Form.Item>
+
+          <Form.Item
+            name="description"
+            label="Description"
+            rules={[
+              { max: 1000, message: 'Description cannot exceed 1000 characters' },
+            ]}
+          >
+            <TextArea 
+              rows={3} 
+              placeholder="Enter parameter description (optional)" 
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="is_secret"
+            valuePropName="checked"
+            label="Security"
+          >
+            <Checkbox>Mark as secret parameter</Checkbox>
+          </Form.Item>
+
+          <Form.Item label="Tags">
+            <Select
+              mode="multiple"
+              placeholder="Select tags to categorize this parameter"
+              value={selectedTags}
+              onChange={setSelectedTags}
+              style={{ width: '100%' }}
+              showSearch
+              filterOption={(input, option) =>
+                option?.children?.toLowerCase().indexOf(input.toLowerCase()) >= 0
+              }
+              tagRender={(props) => {
+                const { label, closable, onClose } = props;
+                return (
+                  <AntTag
+                    color="blue"
+                    closable={closable}
+                    onClose={onClose}
+                    style={{ marginRight: 3, marginBottom: 3 }}
+                  >
+                    {label}
+                  </AntTag>
+                );
+              }}
+            >
+              {allTags.map(tag => (
+                <Select.Option key={tag.id} value={tag.id}>
+                  {tag.name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
+            <Space>
+              <Button onClick={() => setParameterModalVisible(false)}>
+                Cancel
+              </Button>
+              <Button type="primary" htmlType="submit">
+                Create Parameter
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* API Key Creation Modal */}
+      <Modal
+        title="Generate API Key"
+        open={apiKeyModalVisible}
+        onCancel={() => setApiKeyModalVisible(false)}
+        footer={null}
+        width={500}
+      >
+        <Form
+          form={apiKeyForm}
+          layout="vertical"
+          onFinish={handleCreateApiKey}
+        >
+          <Form.Item
+            name="key_name"
+            label="API Key Name"
+            rules={[
+              { required: true, message: 'Please enter a name for this API key' },
+              { max: 255, message: 'Name cannot exceed 255 characters' },
+            ]}
+          >
+            <Input placeholder="Enter a descriptive name (e.g., 'Production App', 'Dev Environment')" />
+          </Form.Item>
+
+          <Form.Item
+            name="expires_days"
+            label="Expiration (Optional)"
+            help="Leave empty for a key that never expires"
+          >
+            <Select placeholder="Select expiration period" allowClear>
+              <Select.Option value={30}>30 days</Select.Option>
+              <Select.Option value={90}>90 days</Select.Option>
+              <Select.Option value={180}>6 months</Select.Option>
+              <Select.Option value={365}>1 year</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
+            <Space>
+              <Button onClick={() => setApiKeyModalVisible(false)}>
+                Cancel
+              </Button>
+              <Button type="primary" htmlType="submit">
+                Generate API Key
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* New API Key Display Modal */}
+      {newApiKey && (
+        <Modal
+          title="API Key Generated Successfully"
+          open={!!newApiKey}
+          onCancel={() => setNewApiKey(null)}
+          footer={[
+            <Button key="close" onClick={() => setNewApiKey(null)}>
+              Close
+            </Button>
+          ]}
+          width={700}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Text type="warning" strong style={{ display: 'block', marginBottom: 12 }}>
+              ⚠️ Save this API key now! You won't be able to see it again.
+            </Text>
+            
+            <div style={{ marginBottom: 16 }}>
+              <Text strong>API Key Name: </Text>
+              <Text>{newApiKey.key_name}</Text>
+            </div>
+            
+            <div style={{ marginBottom: 16 }}>
+              <Text strong>API Key: </Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Input 
+                  value={newApiKey.api_key}
+                  readOnly
+                  style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                />
+                <Tooltip title="Copy API Key">
+                  <Button
+                    icon={<CopyOutlined />}
+                    onClick={() => copyToClipboard(newApiKey.api_key, 'API Key')}
+                  />
+                </Tooltip>
+              </div>
+            </div>
+            
+            <div style={{ marginTop: 24, padding: 16, backgroundColor: '#f9f9f9', borderRadius: 6 }}>
+              <Title level={5}>Usage Examples</Title>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                Use these URLs to access your solution configuration:
+              </Text>
+              
+              {['json', 'yaml', 'env', 'properties'].map(format => {
+                const url = api.generatePublicAPIUrl(newApiKey.api_key, format);
+                return (
+                  <div key={format} style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text type="secondary" style={{ minWidth: 80 }}>{format.toUpperCase()}:</Text>
+                    <Input 
+                      size="small"
+                      value={url}
+                      readOnly
+                      style={{ fontSize: '11px' }}
+                    />
+                    <Tooltip title={`Copy ${format.toUpperCase()} URL`}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CopyOutlined />}
+                        onClick={() => copyToClipboard(url, `${format.toUpperCase()} URL`)}
+                      />
+                    </Tooltip>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

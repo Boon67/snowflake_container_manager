@@ -27,12 +27,14 @@ import {
   SearchOutlined,
 } from '@ant-design/icons';
 import { api, Parameter, CreateParameter, UpdateParameter, Solution, Tag } from '../services/api.ts';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
 const ParameterManager: React.FC = () => {
+  const { isDarkMode } = useTheme();
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [filteredParameters, setFilteredParameters] = useState<Parameter[]>([]);
   const [searchText, setSearchText] = useState('');

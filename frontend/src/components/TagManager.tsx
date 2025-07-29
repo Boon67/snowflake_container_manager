@@ -12,6 +12,8 @@ import {
   Card,
   Tooltip,
   Badge,
+  Tag as AntTag,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -20,8 +22,10 @@ import {
   ReloadOutlined,
   TagsOutlined,
   SearchOutlined,
+  KeyOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
-import { api, Tag, CreateTag } from '../services/api.ts';
+import { api, Tag, CreateTag, Parameter } from '../services/api.ts';
 
 const { Title, Text } = Typography;
 
@@ -33,6 +37,9 @@ const TagManager: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [form] = Form.useForm();
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
+  const [tagParameters, setTagParameters] = useState<Record<string, Parameter[]>>({});
+  const [loadingParameters, setLoadingParameters] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadTags();
@@ -87,6 +94,72 @@ const TagManager: React.FC = () => {
     }
   };
 
+  const loadParametersForTag = async (tagId: string, tagName: string) => {
+    if (tagParameters[tagId]) {
+      return; // Already loaded
+    }
+
+    setLoadingParameters(prev => ({ ...prev, [tagId]: true }));
+    try {
+      const response = await api.searchParameters({ tags: [tagName] });
+      setTagParameters(prev => ({ ...prev, [tagId]: response.data }));
+    } catch (error) {
+      message.error('Failed to load parameters for this tag');
+    } finally {
+      setLoadingParameters(prev => ({ ...prev, [tagId]: false }));
+    }
+  };
+
+  const handleExpand = async (expanded: boolean, record: Tag) => {
+    if (expanded) {
+      await loadParametersForTag(record.id, record.name);
+      setExpandedRowKeys(prev => [...prev, record.id]);
+    } else {
+      setExpandedRowKeys(prev => prev.filter(key => key !== record.id));
+    }
+  };
+
+  const renderExpandedRow = (record: Tag) => {
+    const parameters = tagParameters[record.id] || [];
+    const isLoading = loadingParameters[record.id];
+
+    if (isLoading) {
+      return (
+        <div style={{ padding: '16px', textAlign: 'center' }}>
+          <Spin size="small" />
+          <Text style={{ marginLeft: 8 }}>Loading parameters...</Text>
+        </div>
+      );
+    }
+
+    if (parameters.length === 0) {
+      return (
+        <div style={{ padding: '16px', textAlign: 'center', color: '#999' }}>
+          <Text type="secondary">No parameters are using this tag</Text>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ padding: '16px' }}>
+        <Text strong style={{ marginBottom: 8, display: 'block' }}>
+          Parameters using this tag ({parameters.length}):
+        </Text>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {parameters.map(param => (
+            <AntTag
+              key={param.id}
+              icon={param.is_secret ? <LockOutlined /> : <KeyOutlined />}
+              color={param.is_secret ? 'orange' : 'blue'}
+            >
+              {param.name || param.key}
+            </AntTag>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const handleDelete = async (tag: Tag) => {
     // Check if tag is in use by searching for parameters with this tag
     try {
@@ -124,6 +197,34 @@ const TagManager: React.FC = () => {
           <Text strong>{text}</Text>
         </Space>
       ),
+    },
+    {
+      title: 'Parameters',
+      key: 'parameters',
+      width: 120,
+      render: (_, record: Tag) => {
+        const parameters = tagParameters[record.id];
+        const isLoading = loadingParameters[record.id];
+        
+        if (isLoading) {
+          return <Spin size="small" />;
+        }
+        
+        if (parameters) {
+          return (
+            <Badge 
+              count={parameters.length} 
+              style={{ backgroundColor: parameters.length > 0 ? '#52c41a' : '#d9d9d9' }}
+            />
+          );
+        }
+        
+        return (
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            Click to view
+          </Text>
+        );
+      },
     },
     {
       title: 'Created',
@@ -199,6 +300,22 @@ const TagManager: React.FC = () => {
           dataSource={filteredTags}
           loading={loading}
           rowKey="id"
+          expandable={{
+            expandedRowKeys,
+            onExpand: handleExpand,
+            expandedRowRender: renderExpandedRow,
+            expandRowByClick: true,
+            expandIcon: ({ expanded, onExpand, record }) => 
+              expanded ? (
+                <Button type="text" size="small" onClick={e => onExpand(record, e)}>
+                  Hide Parameters
+                </Button>
+              ) : (
+                <Button type="text" size="small" onClick={e => onExpand(record, e)}>
+                  Show Parameters
+                </Button>
+              )
+          }}
           pagination={{
             pageSize: 15,
             showSizeChanger: true,

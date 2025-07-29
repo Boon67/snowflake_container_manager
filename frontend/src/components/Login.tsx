@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Modal, Form, Input, Button, Typography, Space, message } from 'antd';
-import { UserOutlined, LockOutlined, CloudServerOutlined } from '@ant-design/icons';
+import { Modal, Form, Input, Button, Typography, Space, message, Switch, Tooltip } from 'antd';
+import { UserOutlined, LockOutlined, CloudServerOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const { Title, Text } = Typography;
@@ -9,8 +10,13 @@ const { Title, Text } = Typography;
 const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const { isDarkMode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Dynamic colors for dark mode compatibility
+  const textColor = isDarkMode ? 'var(--snowflake-dark-gray)' : '#212529';
+  const secondaryTextColor = isDarkMode ? 'var(--snowflake-gray)' : '#6C757D';
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
@@ -76,7 +82,7 @@ const Login: React.FC = () => {
               }} 
             />
             <Title level={2} style={{ 
-              color: '#212529', 
+              color: textColor, 
               margin: 0, 
               marginBottom: '8px',
               fontWeight: 600,
@@ -110,9 +116,7 @@ const Login: React.FC = () => {
                 prefix={<UserOutlined style={{ color: '#6C757D' }} />}
                 placeholder="Username"
                 style={{
-                  background: '#FFFFFF',
-                  borderColor: '#DEE2E6',
-                  color: '#212529',
+                  color: textColor,
                   height: '48px',
                   borderRadius: '8px',
                   fontSize: '16px',
@@ -130,9 +134,7 @@ const Login: React.FC = () => {
                 prefix={<LockOutlined style={{ color: '#6C757D' }} />}
                 placeholder="Password"
                 style={{
-                  background: '#FFFFFF',
-                  borderColor: '#DEE2E6',
-                  color: '#212529',
+                  color: textColor,
                   height: '48px',
                   borderRadius: '8px',
                   fontSize: '16px',
@@ -172,11 +174,11 @@ const Login: React.FC = () => {
             borderRadius: '8px',
             padding: '16px'
           }}>
-            <Text style={{ color: '#6C757D', fontSize: '14px' }}>
-              Default credentials: <strong style={{ color: '#212529' }}>admin</strong> / <strong style={{ color: '#212529' }}>password123</strong>
-            </Text>
-            <br />
-            <Text style={{ color: '#6C757D', fontSize: '12px', marginTop: '8px', display: 'block' }}>
+                          <Text style={{ color: secondaryTextColor, fontSize: '14px' }}>
+                Default credentials: <strong style={{ color: textColor }}>admin</strong> / <strong style={{ color: textColor }}>password123</strong>
+              </Text>
+              <br />
+              <Text style={{ color: secondaryTextColor, fontSize: '12px', marginTop: '8px', display: 'block' }}>
               Powered by Snowflake Data Cloud
             </Text>
           </div>

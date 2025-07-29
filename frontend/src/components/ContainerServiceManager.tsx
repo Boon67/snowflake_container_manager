@@ -23,12 +23,16 @@ import {
   CloudServerOutlined,
   DatabaseOutlined,
   SearchOutlined,
+  FileTextOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import { api, ContainerService, ComputePool } from '../services/api.ts';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 
 const { Title, Text } = Typography;
 
 const ContainerServiceManager: React.FC = () => {
+  const { isDarkMode } = useTheme();
   const [containerServices, setContainerServices] = useState<ContainerService[]>([]);
   const [filteredServices, setFilteredServices] = useState<ContainerService[]>([]);
   const [serviceSearchText, setServiceSearchText] = useState('');
@@ -39,6 +43,12 @@ const ContainerServiceManager: React.FC = () => {
   const [operationLoading, setOperationLoading] = useState<string | null>(null);
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedService, setSelectedService] = useState<ContainerService | null>(null);
+  
+  // Logs modal state
+  const [logsModalVisible, setLogsModalVisible] = useState(false);
+  const [selectedPool, setSelectedPool] = useState<ComputePool | null>(null);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -133,6 +143,48 @@ const ContainerServiceManager: React.FC = () => {
   const showServiceDetails = (service: ContainerService) => {
     setSelectedService(service);
     setDetailsModalVisible(true);
+  };
+
+  const handleSuspendPool = async (poolName: string) => {
+    setOperationLoading(poolName);
+    try {
+      await api.suspendComputePool(poolName);
+      message.success(`Compute pool ${poolName} suspended successfully`);
+      loadData(); // Refresh data to get updated status
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || `Failed to suspend pool ${poolName}`);
+    } finally {
+      setOperationLoading(null);
+    }
+  };
+
+  const handleResumePool = async (poolName: string) => {
+    setOperationLoading(poolName);
+    try {
+      await api.resumeComputePool(poolName);
+      message.success(`Compute pool ${poolName} resumed successfully`);
+      loadData(); // Refresh data to get updated status
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || `Failed to resume pool ${poolName}`);
+    } finally {
+      setOperationLoading(null);
+    }
+  };
+
+  const handleViewLogs = async (pool: ComputePool) => {
+    setSelectedPool(pool);
+    setLogsModalVisible(true);
+    setLogsLoading(true);
+    
+    try {
+      const response = await api.getComputePoolLogs(pool.name, 100);
+      setLogs(response.data.logs || []);
+    } catch (error: any) {
+      message.error('Failed to load compute pool logs');
+      setLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -309,6 +361,47 @@ const ContainerServiceManager: React.FC = () => {
       sorter: (a: ComputePool, b: ComputePool) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       render: (date: string) => new Date(date).toLocaleDateString(),
     },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 150,
+      render: (_, record: ComputePool) => (
+        <Space>
+          <Tooltip title="View Logs">
+            <Button
+              type="text"
+              size="small"
+              icon={<FileTextOutlined />}
+              style={{ color: '#1F86C9' }}
+              onClick={() => handleViewLogs(record)}
+            />
+          </Tooltip>
+          {record.state === 'RUNNING' || record.state === 'ACTIVE' ? (
+            <Tooltip title="Suspend Pool">
+              <Button
+                type="text"
+                size="small"
+                icon={<StopOutlined />}
+                style={{ color: '#faad14' }}
+                onClick={() => handleSuspendPool(record.name)}
+                loading={operationLoading === record.name}
+              />
+            </Tooltip>
+          ) : (
+            <Tooltip title="Resume Pool">
+              <Button
+                type="text"
+                size="small"
+                icon={<PlayCircleOutlined />}
+                style={{ color: '#52c41a' }}
+                onClick={() => handleResumePool(record.name)}
+                loading={operationLoading === record.name}
+              />
+            </Tooltip>
+          )}
+        </Space>
+      ),
+    },
   ];
 
   return (
@@ -466,6 +559,87 @@ const ContainerServiceManager: React.FC = () => {
               </Descriptions.Item>
             )}
           </Descriptions>
+        )}
+      </Modal>
+
+      {/* Compute Pool Logs Modal */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined style={{ color: '#1F86C9' }} />
+            Compute Pool Logs: {selectedPool?.name}
+          </Space>
+        }
+        open={logsModalVisible}
+        onCancel={() => setLogsModalVisible(false)}
+        footer={[
+          <Button key="refresh" onClick={() => selectedPool && handleViewLogs(selectedPool)}>
+            Refresh
+          </Button>,
+          <Button key="close" onClick={() => setLogsModalVisible(false)}>
+            Close
+          </Button>,
+        ]}
+        width={900}
+        style={{ top: 20 }}
+      >
+        {logsLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16 }}>Loading compute pool logs...</div>
+          </div>
+        ) : logs.length === 0 ? (
+          <Alert
+            message="No Logs Available"
+            description={`No logs found for compute pool "${selectedPool?.name}". This could be because the pool is newly created or logs are not yet available.`}
+            type="info"
+            showIcon
+          />
+        ) : (
+          <div style={{ maxHeight: '500px', overflow: 'auto' }}>
+            {logs.map((log, index) => {
+              const getLogColor = (level: string) => {
+                switch (level.toUpperCase()) {
+                  case 'ERROR': return '#f5222d';
+                  case 'WARN': return '#faad14';
+                  case 'INFO': return '#1890ff';
+                  case 'DEBUG': return '#52c41a';
+                  default: return '#666666';
+                }
+              };
+
+              return (
+                <div
+                  key={index}
+                  style={{
+                    padding: '8px 12px',
+                    borderBottom: '1px solid #f0f0f0',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    backgroundColor: index % 2 === 0 ? '#fafafa' : '#ffffff',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ color: '#666', minWidth: '140px' }}>
+                      {new Date(log.timestamp).toLocaleString()}
+                    </span>
+                    <AntTag
+                      color={getLogColor(log.level)}
+                      style={{ minWidth: '50px', textAlign: 'center', margin: 0 }}
+                    >
+                      {log.level}
+                    </AntTag>
+                    <span style={{ color: '#1890ff', minWidth: '80px' }}>
+                      [{log.component}]
+                    </span>
+                    <span style={{ color: '#262626', flex: 1 }}>
+                      {log.message}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </Modal>
     </div>

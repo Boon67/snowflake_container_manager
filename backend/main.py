@@ -69,7 +69,14 @@ def check_database_connection():
         if not users:
             default_username = os.getenv("DEFAULT_USERNAME", "admin")
             default_password = os.getenv("DEFAULT_PASSWORD", "password123")
-            user_create = models.UserCreate(username=default_username, password=default_password)
+            user_create = models.UserCreate(
+                username=default_username, 
+                password=default_password,
+                role="admin",
+                is_active=True,
+                is_sso_user=False,
+                use_snowflake_auth=False
+            )
             auth.create_user(db, user_create)
             logger.info(f"✅ Default user '{default_username}' created successfully")
         
@@ -137,6 +144,240 @@ async def login_for_access_token(form_data: models.UserLogin):
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+# --- User Management Endpoints ---
+@app.get("/api/users", response_model=List[models.User])
+async def get_users(current_user: models.User = Depends(auth.get_current_active_user)):
+    """Get all users (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can view all users"
+        )
+    
+    db = get_database()
+    users = auth.get_all_users(db)
+    return users
+
+@app.post("/api/users", response_model=models.User)
+async def create_user(
+    user_data: models.UserCreate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new user (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can create new users"
+        )
+    
+    db = get_database()
+    try:
+        new_user = auth.create_user(db, user_data)
+        # Convert UserInDB to User for response
+        user_response = models.User(
+            id=new_user.id,
+            username=new_user.username,
+            email=new_user.email,
+            first_name=new_user.first_name,
+            last_name=new_user.last_name,
+            role=new_user.role,
+            is_active=new_user.is_active,
+            is_sso_user=new_user.is_sso_user,
+            sso_provider=new_user.sso_provider,
+            sso_user_id=new_user.sso_user_id,
+            use_snowflake_auth=new_user.use_snowflake_auth,
+            last_login=new_user.last_login,
+            created_at=new_user.created_at,
+            updated_at=new_user.updated_at
+        )
+        return user_response
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@app.get("/api/users/{user_id}", response_model=models.User)
+async def get_user(
+    user_id: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get user by ID (admin or self)"""
+    if current_user.role != "admin" and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own profile"
+        )
+    
+    db = get_database()
+    user = auth.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Convert UserInDB to User for response
+    user_response = models.User(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role,
+        is_active=user.is_active,
+        is_sso_user=user.is_sso_user,
+        sso_provider=user.sso_provider,
+        sso_user_id=user.sso_user_id,
+        use_snowflake_auth=user.use_snowflake_auth,
+        last_login=user.last_login,
+        created_at=user.created_at,
+        updated_at=user.updated_at
+    )
+    return user_response
+
+@app.put("/api/users/{user_id}", response_model=models.User)
+async def update_user(
+    user_id: str,
+    user_update: models.UserUpdate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Update user (admin or self)"""
+    # Users can update their own profile, but only admins can change roles or other users
+    if current_user.role != "admin" and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update your own profile"
+        )
+    
+    # Non-admin users cannot change role or admin-only fields
+    if current_user.role != "admin" and current_user.id == user_id:
+        if user_update.role is not None or user_update.is_active is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot change role or status fields"
+            )
+    
+    db = get_database()
+    updated_user = auth.update_user(db, user_id, user_update)
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Convert UserInDB to User for response
+    user_response = models.User(
+        id=updated_user.id,
+        username=updated_user.username,
+        email=updated_user.email,
+        first_name=updated_user.first_name,
+        last_name=updated_user.last_name,
+        role=updated_user.role,
+        is_active=updated_user.is_active,
+        is_sso_user=updated_user.is_sso_user,
+        sso_provider=updated_user.sso_provider,
+        sso_user_id=updated_user.sso_user_id,
+        use_snowflake_auth=updated_user.use_snowflake_auth,
+        last_login=updated_user.last_login,
+        created_at=updated_user.created_at,
+        updated_at=updated_user.updated_at
+    )
+    return user_response
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete user (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can delete users"
+        )
+    
+    if current_user.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account"
+        )
+    
+    db = get_database()
+    user = auth.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    auth.delete_user(db, user_id)
+    return {"message": "User deleted successfully"}
+
+@app.post("/api/users/password-reset-request")
+async def request_password_reset(request: models.PasswordResetRequest):
+    """Request password reset token"""
+    db = get_database()
+    reset_token = auth.generate_password_reset_token(db, request.username)
+    
+    if reset_token:
+        # In a real application, you would send this token via email
+        # For now, we'll just return it (not secure for production)
+        logger.info(f"Password reset token for {request.username}: {reset_token}")
+        return {"message": "Password reset token generated", "reset_token": reset_token}
+    else:
+        return {"message": "If the user exists and is eligible for password reset, a token has been generated"}
+
+@app.post("/api/users/password-reset")
+async def reset_password(reset_data: models.PasswordReset):
+    """Reset user password with token"""
+    db = get_database()
+    success = auth.reset_password(
+        db, 
+        reset_data.username, 
+        reset_data.new_password, 
+        reset_data.reset_token
+    )
+    
+    if success:
+        return {"message": "Password reset successfully"}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token or unable to reset password"
+        )
+
+@app.post("/api/users/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: str,
+    new_password_data: dict,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Admin reset user password (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin users can reset passwords"
+        )
+    
+    db = get_database()
+    user = auth.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    success = auth.reset_password(db, user.username, new_password_data["new_password"])
+    
+    if success:
+        return {"message": "Password reset successfully"}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to reset password (user may be SSO or Snowflake auth)"
+        )
 
 # --- Solution Endpoints ---
 @app.post("/api/solutions", response_model=models.Solution)
@@ -288,6 +529,384 @@ async def delete_solution(
     db.execute_non_query("DELETE FROM SOLUTIONS WHERE ID = %s", (solution_id,))
     
     return models.APIResponse(message="Solution deleted successfully")
+
+@app.get("/api/solutions/{solution_id}/export")
+async def export_solution_config(
+    solution_id: str,
+    format: str = "json",
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Export solution configuration for application usage"""
+    from fastapi.responses import Response
+    import json
+    import yaml
+    
+    db = get_database()
+    
+    # Get solution details
+    solution_data = db.execute_query("SELECT * FROM SOLUTIONS WHERE ID = %s", (solution_id,))
+    if not solution_data:
+        raise HTTPException(status_code=404, detail="Solution not found")
+    
+    solution = solution_data[0]
+    
+    # Get solution parameters with their tags
+    params_query = """
+    SELECT p.*, 
+           LISTAGG(t.NAME, ',') WITHIN GROUP (ORDER BY t.NAME) as tag_names
+    FROM PARAMETERS p
+    JOIN SOLUTION_PARAMETERS sp ON p.ID = sp.PARAMETER_ID
+    LEFT JOIN PARAMETER_TAGS pt ON p.ID = pt.PARAMETER_ID
+    LEFT JOIN TAGS t ON pt.TAG_ID = t.ID
+    WHERE sp.SOLUTION_ID = %s
+    GROUP BY p.ID, p.NAME, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
+    ORDER BY p.KEY
+    """
+    
+    params_data = db.execute_query(params_query, (solution_id,))
+    
+    # Build configuration structure
+    config = {
+        "solution": {
+            "id": solution['ID'],
+            "name": solution['NAME'],
+            "description": solution.get('DESCRIPTION', ''),
+            "created_at": solution['CREATED_AT'].isoformat() if solution['CREATED_AT'] else None,
+            "exported_at": datetime.now().isoformat()
+        },
+        "parameters": {},
+        "metadata": {
+            "parameter_count": len(params_data),
+            "secret_parameter_count": len([p for p in params_data if p.get('IS_SECRET', False)]),
+            "tags": []
+        }
+    }
+    
+    # Process parameters
+    all_tags = set()
+    for param in params_data:
+        param_config = {
+            "value": param.get('VALUE', ''),
+            "description": param.get('DESCRIPTION', ''),
+            "is_secret": bool(param.get('IS_SECRET', False)),
+            "name": param.get('NAME', ''),
+            "tags": []
+        }
+        
+        # Add tags if they exist
+        if param.get('TAG_NAMES'):
+            param_tags = [tag.strip() for tag in param['TAG_NAMES'].split(',') if tag.strip()]
+            param_config["tags"] = param_tags
+            all_tags.update(param_tags)
+        
+        # For secret parameters, don't include the actual value in export
+        if param_config["is_secret"]:
+            param_config["value"] = "*** HIDDEN ***"
+            param_config["_note"] = "Secret parameter value not exported for security"
+        
+        config["parameters"][param['KEY']] = param_config
+    
+    config["metadata"]["tags"] = sorted(list(all_tags))
+    
+    # Format response based on requested format
+    if format.lower() == "yaml":
+        content = yaml.dump(config, default_flow_style=False, sort_keys=False)
+        media_type = "application/x-yaml"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.yaml"
+    elif format.lower() == "env":
+        # Environment variable format
+        lines = [f"# Configuration for {solution['NAME']}"]
+        lines.append(f"# Generated on {datetime.now().isoformat()}")
+        lines.append("")
+        
+        for key, param in config["parameters"].items():
+            if param["description"]:
+                lines.append(f"# {param['description']}")
+            if param["is_secret"]:
+                lines.append(f"# SECRET: {key}=<your_secret_value_here>")
+            else:
+                lines.append(f"{key}={param['value']}")
+            lines.append("")
+        
+        content = "\n".join(lines)
+        media_type = "text/plain"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.env"
+    elif format.lower() == "properties":
+        # Java properties format
+        lines = [f"# Configuration for {solution['NAME']}"]
+        lines.append(f"# Generated on {datetime.now().isoformat()}")
+        lines.append("")
+        
+        for key, param in config["parameters"].items():
+            if param["description"]:
+                lines.append(f"# {param['description']}")
+            if param["is_secret"]:
+                lines.append(f"# {key}=<your_secret_value_here>")
+            else:
+                # Escape special characters for properties format
+                value = str(param['value']).replace('\\', '\\\\').replace('=', '\\=').replace(':', '\\:')
+                lines.append(f"{key}={value}")
+            lines.append("")
+        
+        content = "\n".join(lines)
+        media_type = "text/plain"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.properties"
+    else:
+        # Default to JSON
+        content = json.dumps(config, indent=2, default=str)
+        media_type = "application/json"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.json"
+    
+    # Return file download response
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": f"{media_type}; charset=utf-8"
+        }
+    )
+
+# --- Solution API Key Endpoints ---
+@app.post("/api/solutions/{solution_id}/api-keys", response_model=models.SolutionAPIKeyResponse)
+async def create_solution_api_key(
+    solution_id: str,
+    key_data: models.CreateSolutionAPIKey,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new API key for a solution"""
+    import secrets
+    import hashlib
+    from datetime import datetime, timedelta
+    
+    db = get_database()
+    
+    # Check if solution exists
+    solution_data = db.execute_query("SELECT * FROM SOLUTIONS WHERE ID = %s", (solution_id,))
+    if not solution_data:
+        raise HTTPException(status_code=404, detail="Solution not found")
+    
+    # Generate secure API key
+    api_key = f"sol_{secrets.token_urlsafe(32)}"
+    
+    # Calculate expiration date if specified
+    expires_at = None
+    if key_data.expires_days:
+        expires_at = datetime.now() + timedelta(days=key_data.expires_days)
+    
+    # Create API key
+    api_key_id = db.create_solution_api_key(
+        solution_id=solution_id,
+        key_name=key_data.key_name,
+        api_key=api_key,
+        expires_at=expires_at
+    )
+    
+    return models.SolutionAPIKeyResponse(
+        id=api_key_id,
+        solution_id=solution_id,
+        key_name=key_data.key_name,
+        api_key=api_key,
+        is_active=True,
+        created_at=datetime.now(),
+        expires_at=expires_at
+    )
+
+@app.get("/api/solutions/{solution_id}/api-keys", response_model=List[models.SolutionAPIKeyList])
+async def get_solution_api_keys(
+    solution_id: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all API keys for a solution"""
+    db = get_database()
+    
+    # Check if solution exists
+    solution_data = db.execute_query("SELECT * FROM SOLUTIONS WHERE ID = %s", (solution_id,))
+    if not solution_data:
+        raise HTTPException(status_code=404, detail="Solution not found")
+    
+    api_keys = db.get_solution_api_keys(solution_id)
+    
+    return [
+        models.SolutionAPIKeyList(
+            id=key['ID'],
+            solution_id=key['SOLUTION_ID'],
+            key_name=key['KEY_NAME'],
+            api_key_preview=f"...{key['API_KEY'][-4:]}" if key['API_KEY'] else "...",
+            is_active=key['IS_ACTIVE'],
+            created_at=key['CREATED_AT'],
+            last_used=key['LAST_USED'],
+            expires_at=key['EXPIRES_AT']
+        )
+        for key in api_keys
+    ]
+
+@app.delete("/api/solutions/{solution_id}/api-keys/{api_key_id}")
+async def delete_solution_api_key(
+    solution_id: str,
+    api_key_id: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete an API key"""
+    db = get_database()
+    db.delete_solution_api_key(api_key_id)
+    return models.APIResponse(message="API key deleted successfully")
+
+@app.patch("/api/solutions/{solution_id}/api-keys/{api_key_id}/toggle")
+async def toggle_solution_api_key(
+    solution_id: str,
+    api_key_id: str,
+    is_active: bool,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Enable/disable an API key"""
+    db = get_database()
+    db.toggle_solution_api_key(api_key_id, is_active)
+    return models.APIResponse(message="API key updated successfully")
+
+# --- Public API Key Export Endpoint (No Authentication Required) ---
+@app.get("/api/public/solutions/config")
+async def get_solution_config_by_api_key(
+    api_key: str,
+    format: str = "json"
+):
+    """Get solution configuration using API key (no authentication required)"""
+    from fastapi.responses import Response
+    import json
+    import yaml
+    
+    db = get_database()
+    
+    # Validate API key
+    key_info = db.validate_solution_api_key(api_key)
+    if not key_info:
+        raise HTTPException(status_code=401, detail="Invalid or expired API key")
+    
+    solution_id = key_info['SOLUTION_ID']
+    
+    # Get solution details
+    solution_data = db.execute_query("SELECT * FROM SOLUTIONS WHERE ID = %s", (solution_id,))
+    if not solution_data:
+        raise HTTPException(status_code=404, detail="Solution not found")
+    
+    solution = solution_data[0]
+    
+    # Get solution parameters with their tags
+    params_query = """
+    SELECT p.*, 
+           LISTAGG(t.NAME, ',') WITHIN GROUP (ORDER BY t.NAME) as tag_names
+    FROM PARAMETERS p
+    JOIN SOLUTION_PARAMETERS sp ON p.ID = sp.PARAMETER_ID
+    LEFT JOIN PARAMETER_TAGS pt ON p.ID = pt.PARAMETER_ID
+    LEFT JOIN TAGS t ON pt.TAG_ID = t.ID
+    WHERE sp.SOLUTION_ID = %s
+    GROUP BY p.ID, p.NAME, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
+    ORDER BY p.KEY
+    """
+    
+    params_data = db.execute_query(params_query, (solution_id,))
+    
+    # Build configuration structure
+    config = {
+        "solution": {
+            "id": solution['ID'],
+            "name": solution['NAME'],
+            "description": solution.get('DESCRIPTION', ''),
+            "created_at": solution['CREATED_AT'].isoformat() if solution['CREATED_AT'] else None,
+            "exported_at": datetime.now().isoformat()
+        },
+        "parameters": {},
+        "metadata": {
+            "parameter_count": len(params_data),
+            "secret_parameter_count": len([p for p in params_data if p.get('IS_SECRET', False)]),
+            "tags": []
+        }
+    }
+    
+    # Process parameters
+    all_tags = set()
+    for param in params_data:
+        param_config = {
+            "value": param.get('VALUE', ''),
+            "description": param.get('DESCRIPTION', ''),
+            "is_secret": bool(param.get('IS_SECRET', False)),
+            "name": param.get('NAME', ''),
+            "tags": []
+        }
+        
+        # Add tags if they exist
+        if param.get('TAG_NAMES'):
+            param_tags = [tag.strip() for tag in param['TAG_NAMES'].split(',') if tag.strip()]
+            param_config["tags"] = param_tags
+            all_tags.update(param_tags)
+        
+        # For secret parameters, don't include the actual value in export
+        if param_config["is_secret"]:
+            param_config["value"] = "*** HIDDEN ***"
+            param_config["_note"] = "Secret parameter value not exported for security"
+        
+        config["parameters"][param['KEY']] = param_config
+    
+    config["metadata"]["tags"] = sorted(list(all_tags))
+    
+    # Format response based on requested format
+    if format.lower() == "yaml":
+        content = yaml.dump(config, default_flow_style=False, sort_keys=False)
+        media_type = "application/x-yaml"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.yaml"
+    elif format.lower() == "env":
+        # Environment variable format
+        lines = [f"# Configuration for {solution['NAME']}"]
+        lines.append(f"# Generated on {datetime.now().isoformat()}")
+        lines.append("")
+        
+        for key, param in config["parameters"].items():
+            if param["description"]:
+                lines.append(f"# {param['description']}")
+            if param["is_secret"]:
+                lines.append(f"# SECRET: {key}=<your_secret_value_here>")
+            else:
+                lines.append(f"{key}={param['value']}")
+            lines.append("")
+        
+        content = "\n".join(lines)
+        media_type = "text/plain"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.env"
+    elif format.lower() == "properties":
+        # Java properties format
+        lines = [f"# Configuration for {solution['NAME']}"]
+        lines.append(f"# Generated on {datetime.now().isoformat()}")
+        lines.append("")
+        
+        for key, param in config["parameters"].items():
+            if param["description"]:
+                lines.append(f"# {param['description']}")
+            if param["is_secret"]:
+                lines.append(f"# {key}=<your_secret_value_here>")
+            else:
+                # Escape special characters for properties format
+                value = str(param['value']).replace('\\', '\\\\').replace('=', '\\=').replace(':', '\\:')
+                lines.append(f"{key}={value}")
+            lines.append("")
+        
+        content = "\n".join(lines)
+        media_type = "text/plain"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.properties"
+    else:
+        # Default to JSON
+        content = json.dumps(config, indent=2, default=str)
+        media_type = "application/json"
+        filename = f"{solution['NAME'].replace(' ', '_')}_config.json"
+    
+    # Return file download response
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": f"{media_type}; charset=utf-8"
+        }
+    )
 
 # --- Parameter Endpoints ---
 @app.post("/api/parameters", response_model=models.Parameter)
@@ -923,6 +1542,186 @@ async def get_compute_pools(current_user: models.User = Depends(auth.get_current
     except Exception as e:
         logger.error(f"Error getting compute pools: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve compute pools")
+
+@app.post("/api/compute-pools/{pool_name}/suspend")
+async def suspend_compute_pool(
+    pool_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Suspend a compute pool"""
+    db = get_database()
+    success = db.suspend_compute_pool(pool_name)
+    
+    if success:
+        return models.APIResponse(message=f"Compute pool {pool_name} suspended successfully")
+    else:
+        raise HTTPException(status_code=500, detail=f"Failed to suspend compute pool {pool_name}")
+
+@app.post("/api/compute-pools/{pool_name}/resume")
+async def resume_compute_pool(
+    pool_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Resume a compute pool"""
+    db = get_database()
+    success = db.resume_compute_pool(pool_name)
+    
+    if success:
+        return models.APIResponse(message=f"Compute pool {pool_name} resumed successfully")
+    else:
+        raise HTTPException(status_code=500, detail=f"Failed to resume compute pool {pool_name}")
+
+@app.get("/api/compute-pools/{pool_name}/logs")
+async def get_compute_pool_logs(
+    pool_name: str,
+    limit: int = 100,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get logs for a compute pool"""
+    db = get_database()
+    logs = db.get_compute_pool_logs(pool_name, limit)
+    
+    return {
+        "pool_name": pool_name,
+        "logs": logs,
+        "total_count": len(logs)
+    }
+
+# --- Analytics Endpoints ---
+@app.post("/api/analytics/credit-usage", response_model=List[models.CreditUsage])
+async def get_credit_usage(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get credit usage data for compute pools"""
+    db = get_database()
+    try:
+        usage_data = db.get_credit_usage(
+            start_date=filter_params.start_date,
+            end_date=filter_params.end_date,
+            period_type=filter_params.period_type,
+            compute_pool_names=filter_params.compute_pool_names
+        )
+        
+        credit_usage = []
+        for usage in usage_data:
+            credit = models.CreditUsage(
+                compute_pool_name=usage['compute_pool_name'],
+                date=usage['date'],
+                credits_used=usage['credits_used'],
+                credits_billed=usage['credits_billed'],
+                period_type=usage['period_type']
+            )
+            credit_usage.append(credit)
+        
+        return credit_usage
+    except Exception as e:
+        logger.error(f"Error getting credit usage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve credit usage data")
+
+@app.post("/api/analytics/credit-usage-summary", response_model=models.CreditUsageSummary)
+async def get_credit_usage_summary(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get credit usage summary for compute pools"""
+    db = get_database()
+    try:
+        summary_data = db.get_credit_usage_summary(
+            start_date=filter_params.start_date,
+            end_date=filter_params.end_date,
+            period_type=filter_params.period_type,
+            compute_pool_names=filter_params.compute_pool_names
+        )
+        
+        # Convert individual usage items
+        credit_usage = []
+        for usage in summary_data['compute_pools']:
+            credit = models.CreditUsage(
+                compute_pool_name=usage['compute_pool_name'],
+                date=usage['date'],
+                credits_used=usage['credits_used'],
+                credits_billed=usage['credits_billed'],
+                period_type=usage['period_type']
+            )
+            credit_usage.append(credit)
+        
+        summary = models.CreditUsageSummary(
+            total_credits_used=summary_data['total_credits_used'],
+            total_credits_billed=summary_data['total_credits_billed'],
+            period_start=summary_data['period_start'],
+            period_end=summary_data['period_end'],
+            compute_pools=credit_usage
+        )
+        
+        return summary
+    except Exception as e:
+        logger.error(f"Error getting credit usage summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve credit usage summary")
+
+@app.post("/api/analytics/daily-credit-rollup")
+async def get_daily_credit_rollup(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get daily credit usage rollup with aggregated metrics"""
+    try:
+        db = get_database()
+        
+        start_date = None
+        end_date = None
+        if filter_params.start_date:
+            start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+        if filter_params.end_date:
+            end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+        
+        rollup_data = db.get_daily_credit_rollup(
+            start_date=start_date,
+            end_date=end_date,
+            compute_pool_names=filter_params.compute_pool_names
+        )
+        
+        return {
+            "period_type": "daily_rollup",
+            "start_date": start_date.isoformat() if start_date else None,
+            "end_date": end_date.isoformat() if end_date else None,
+            "data": rollup_data
+        }
+    except Exception as e:
+        logger.error(f"Error in daily credit rollup endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve daily credit rollup: {str(e)}")
+
+@app.post("/api/analytics/hourly-heatmap")
+async def get_hourly_heatmap(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get hourly credit usage data for heatmap visualization"""
+    try:
+        db = get_database()
+        
+        start_date = None
+        end_date = None
+        if filter_params.start_date:
+            start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+        if filter_params.end_date:
+            end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+        
+        heatmap_data = db.get_hourly_heatmap_data(
+            start_date=start_date,
+            end_date=end_date,
+            compute_pool_names=filter_params.compute_pool_names
+        )
+        
+        return {
+            "period_type": "hourly_heatmap", 
+            "start_date": start_date.isoformat() if start_date else None,
+            "end_date": end_date.isoformat() if end_date else None,
+            "data": heatmap_data
+        }
+    except Exception as e:
+        logger.error(f"Error in hourly heatmap endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve hourly heatmap: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

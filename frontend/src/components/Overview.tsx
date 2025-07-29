@@ -24,6 +24,7 @@ import {
   ReloadOutlined 
 } from '@ant-design/icons';
 import { api, Solution, Tag } from '../services/api.ts';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 
 const { Title } = Typography;
 
@@ -33,6 +34,7 @@ interface OverviewStats {
   tagsCount: number;
   secretParametersCount: number;
   containerServicesCount: number;
+  apiKeysCount: number;
 }
 
 interface OverviewProps {
@@ -41,6 +43,12 @@ interface OverviewProps {
 }
 
 const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSolution }) => {
+  const { isDarkMode } = useTheme();
+  
+  // Dynamic colors for dark mode compatibility
+  const textColor = isDarkMode ? 'var(--snowflake-dark-gray)' : '#212529';
+  const secondaryTextColor = isDarkMode ? 'var(--snowflake-gray)' : '#6C757D';
+  const borderColor = isDarkMode ? 'var(--snowflake-border)' : '#DEE2E6';
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<OverviewStats>({
     solutionsCount: 0,
@@ -48,6 +56,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
     tagsCount: 0,
     secretParametersCount: 0,
     containerServicesCount: 0,
+    apiKeysCount: 0,
   });
   const [recentSolutions, setRecentSolutions] = useState<Solution[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -75,12 +84,25 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
       // Calculate statistics from all parameters
       const secretParameters = allParameters.filter(p => p.is_secret).length;
 
+      // Load API keys count for all solutions
+      let totalApiKeys = 0;
+      try {
+        const apiKeyPromises = solutions.map(solution => 
+          api.getSolutionAPIKeys(solution.id).catch(() => ({ data: [] }))
+        );
+        const apiKeyResponses = await Promise.all(apiKeyPromises);
+        totalApiKeys = apiKeyResponses.reduce((total, response) => total + response.data.length, 0);
+      } catch (error) {
+        console.warn('Failed to load API keys count:', error);
+      }
+
       setStats({
         solutionsCount: solutions.length,
         parametersCount: allParameters.length, // Use actual parameter count
         tagsCount: tags.length,
         secretParametersCount: secretParameters,
         containerServicesCount: 0, // Placeholder, will be updated later if API supports it
+        apiKeysCount: totalApiKeys,
       });
 
       // Get recent solutions (last 5) and ensure they have parameter counts
@@ -119,7 +141,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
 
   return (
     <div>
-      <Title level={2} style={{ color: '#212529', marginBottom: 24, fontWeight: 600 }}>
+      <Title level={2} style={{ color: textColor, marginBottom: 24, fontWeight: 600 }}>
         System Overview
       </Title>
 
@@ -129,8 +151,6 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
             hoverable
             onClick={() => onNavigateToTab('solutions')}
             style={{
-              background: '#FFFFFF',
-              borderColor: '#DEE2E6',
               borderRadius: '8px',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
               cursor: 'pointer',
@@ -141,7 +161,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
               title="Solutions"
               value={stats.solutionsCount}
               prefix={<DatabaseOutlined style={{ color: '#1F86C9' }} />}
-              valueStyle={{ color: '#212529', fontWeight: 600 }}
+              valueStyle={{ fontWeight: 600 }}
             />
           </Card>
         </Col>
@@ -150,8 +170,6 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
             hoverable
             onClick={() => onNavigateToTab('parameters')}
             style={{
-              background: '#FFFFFF',
-              borderColor: '#DEE2E6',
               borderRadius: '8px',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
               cursor: 'pointer',
@@ -162,7 +180,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
               title="Parameters"
               value={stats.parametersCount}
               prefix={<SettingOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: '#212529', fontWeight: 600 }}
+              valueStyle={{ fontWeight: 600 }}
             />
           </Card>
         </Col>
@@ -183,7 +201,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
               title="Tags"
               value={stats.tagsCount}
               prefix={<TagsOutlined style={{ color: '#faad14' }} />}
-              valueStyle={{ color: '#212529', fontWeight: 600 }}
+              valueStyle={{ color: textColor, fontWeight: 600 }}
             />
           </Card>
         </Col>
@@ -204,7 +222,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
               title="Container Services"
               value={stats.containerServicesCount}
               prefix={<DatabaseOutlined style={{ color: '#722ed1' }} />}
-              valueStyle={{ color: '#212529', fontWeight: 600 }}
+              valueStyle={{ color: textColor, fontWeight: 600 }}
             />
           </Card>
         </Col>
@@ -228,7 +246,70 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
               title="Secret Parameters"
               value={stats.secretParametersCount}
               prefix={<DatabaseOutlined style={{ color: '#f5222d' }} />}
-              valueStyle={{ color: '#212529', fontWeight: 600 }}
+              valueStyle={{ color: textColor, fontWeight: 600 }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card
+            hoverable
+            onClick={() => onNavigateToTab('solutions')}
+            style={{
+              background: '#FFFFFF',
+              borderColor: '#DEE2E6',
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <Statistic
+              title="API Keys"
+              value={stats.apiKeysCount}
+              prefix={<DatabaseOutlined style={{ color: '#13c2c2' }} />}
+              valueStyle={{ color: textColor, fontWeight: 600 }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card
+            hoverable
+            onClick={() => onNavigateToTab('analytics')}
+            style={{
+              background: '#FFFFFF',
+              borderColor: '#DEE2E6',
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <Statistic
+              title="Analytics"
+              value="View"
+              prefix={<DatabaseOutlined style={{ color: '#eb2f96' }} />}
+              valueStyle={{ color: textColor, fontWeight: 600, fontSize: '14px' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card
+            hoverable
+            onClick={() => onNavigateToTab('users')}
+            style={{
+              background: '#FFFFFF',
+              borderColor: '#DEE2E6',
+              borderRadius: '8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+            }}
+          >
+            <Statistic
+              title="User Management"
+              value="Manage"
+              prefix={<DatabaseOutlined style={{ color: '#722ed1' }} />}
+              valueStyle={{ color: textColor, fontWeight: 600, fontSize: '14px' }}
             />
           </Card>
         </Col>
@@ -244,24 +325,26 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
               borderRadius: '8px',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
             }}
-            headStyle={{ 
-              color: '#212529', 
-              borderBottom: '1px solid #DEE2E6',
-              background: '#F8F9FA',
-              fontWeight: 600
+            styles={{ 
+              header: {
+                color: '#212529', 
+                borderBottom: '1px solid #DEE2E6',
+                background: '#F8F9FA',
+                fontWeight: 600
+              }
             }}
           >
             {recentSolutions.length === 0 ? (
               <div style={{ 
                 textAlign: 'center', 
                 padding: '40px 20px', 
-                color: '#6C757D',
+                color: secondaryTextColor,
                 background: '#F8F9FA',
                 borderRadius: '6px',
-                border: '2px dashed #DEE2E6'
+                border: '2px dashedrgb(0, 128, 255)'
               }}>
                 <DatabaseOutlined style={{ fontSize: '48px', color: '#1F86C9', marginBottom: '16px' }} />
-                <div style={{ fontSize: '16px', marginBottom: '8px', color: '#212529' }}>
+                <div style={{ fontSize: '16px', marginBottom: '8px', color: textColor }}>
                   No solutions found
                 </div>
                 <div style={{ fontSize: '14px' }}>
@@ -296,14 +379,14 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
                   }}
                 >
                   <div>
-                    <div style={{ color: '#212529', fontWeight: 600, fontSize: '16px' }}>
+                    <div style={{ color: textColor, fontWeight: 600, fontSize: '16px' }}>
                       {solution.name}
                     </div>
-                    <div style={{ color: '#6C757D', fontSize: '14px' }}>
+                    <div style={{ color: secondaryTextColor, fontSize: '14px' }}>
                       {solution.parameter_count || 0} parameters
                     </div>
                   </div>
-                  <div style={{ color: '#6C757D', fontSize: '12px' }}>
+                  <div style={{ color: secondaryTextColor, fontSize: '12px' }}>
                     {new Date(solution.updated_at).toLocaleDateString()}
                   </div>
                 </div>
@@ -312,56 +395,130 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card
+                    <Card 
             title="Quick Actions"
             style={{
-              background: '#FFFFFF',
-              borderColor: '#DEE2E6',
               borderRadius: '8px',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
             }}
-            headStyle={{ 
-              color: '#212529', 
-              borderBottom: '1px solid #DEE2E6',
-              background: '#F8F9FA',
-              fontWeight: 600
+            styles={{ 
+              header: {
+                color: textColor, 
+                borderBottom: `1px solid ${borderColor}`,
+                background: isDarkMode ? 'var(--snowflake-light-blue)' : '#F8F9FA',
+                fontWeight: 600
+              }
             }}
           >
-            <div style={{ color: '#6C757D', lineHeight: '1.6' }}>
-              <div style={{ 
-                marginBottom: '16px', 
-                padding: '12px',
-                background: '#E8F4FD',
-                borderRadius: '6px',
-                borderLeft: '4px solid #1F86C9'
-              }}>
-                <strong style={{ color: '#0D4F8C' }}>Solutions:</strong> Create and manage configuration solutions for your data workflows
+            <div style={{ color: secondaryTextColor, lineHeight: '1.6' }}>
+              <div 
+                onClick={() => onNavigateToTab('solutions')}
+                style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px',
+                  background: '#E8F4FD',
+                  borderRadius: '6px',
+                  borderLeft: '4px solid #1F86C9',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#D1E9F6';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#E8F4FD';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <strong style={{ color: '#0D4F8C' }}>📋 Create Solution:</strong> Set up new configuration solutions with parameters and API keys
               </div>
-              <div style={{ 
-                marginBottom: '16px', 
-                padding: '12px',
-                background: '#F6FFED',
-                borderRadius: '6px',
-                borderLeft: '4px solid #52c41a'
-              }}>
-                <strong style={{ color: '#389e0d' }}>Parameters:</strong> Add key-value configurations with dynamic tagging and metadata
+              <div 
+                onClick={() => onNavigateToTab('parameters')}
+                style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px',
+                  background: '#F6FFED',
+                  borderRadius: '6px',
+                  borderLeft: '4px solid #52c41a',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#E6F7E0';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F6FFED';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <strong style={{ color: '#389e0d' }}>⚙️ Add Parameters:</strong> Define key-value configurations with metadata and tagging
               </div>
-              <div style={{ 
-                marginBottom: '16px', 
-                padding: '12px',
-                background: '#FFFBE6',
-                borderRadius: '6px',
-                borderLeft: '4px solid #faad14'
-              }}>
-                <strong style={{ color: '#d48806' }}>Tags:</strong> Organize configurations using tags for better management and filtering
+              <div 
+                onClick={() => onNavigateToTab('container-services')}
+                style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px',
+                  background: '#F4F0FF',
+                  borderRadius: '6px',
+                  borderLeft: '4px solid #722ed1',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#EEEAFF';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F4F0FF';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <strong style={{ color: '#531dab' }}>🐳 Manage Containers:</strong> Monitor and control Snowpark Container Services
               </div>
-              <div style={{ 
-                padding: '12px',
-                background: '#FFF2F0',
-                borderRadius: '6px',
-                borderLeft: '4px solid #f5222d'
-              }}>
-                <strong style={{ color: '#cf1322' }}>Security:</strong> Mark sensitive data as secrets for enhanced protection
+              <div 
+                onClick={() => onNavigateToTab('analytics')}
+                style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px',
+                  background: '#FFF0F6',
+                  borderRadius: '6px',
+                  borderLeft: '4px solid #eb2f96',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#FFE0ED';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#FFF0F6';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <strong style={{ color: '#c41d7f' }}>📊 View Analytics:</strong> Monitor compute pool credit usage and performance metrics
+              </div>
+              <div 
+                onClick={() => onNavigateToTab('users')}
+                style={{ 
+                  padding: '12px',
+                  background: '#F0F5FF',
+                  borderRadius: '6px',
+                  borderLeft: '4px solid #2f54eb',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#E6F0FF';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F0F5FF';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <strong style={{ color: '#1d39c4' }}>👥 Manage Users:</strong> Configure user accounts, roles, and authentication settings
               </div>
             </div>
           </Card>

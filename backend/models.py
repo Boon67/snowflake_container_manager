@@ -81,24 +81,62 @@ class Solution(SolutionBase):
 # --- User Models ---
 class UserBase(BaseModel):
     username: str = Field(..., max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    first_name: Optional[str] = Field(None, max_length=255)
+    last_name: Optional[str] = Field(None, max_length=255)
+    role: str = Field(default="user", max_length=50)
+    is_active: bool = Field(default=True)
 
 class UserCreate(UserBase):
-    password: str
+    password: Optional[str] = None
+    is_sso_user: bool = Field(default=False)
+    sso_provider: Optional[str] = Field(None, max_length=100)
+    sso_user_id: Optional[str] = Field(None, max_length=255)
+    use_snowflake_auth: bool = Field(default=False)
+
+class UserUpdate(BaseModel):
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_sso_user: Optional[bool] = None
+    sso_provider: Optional[str] = None
+    sso_user_id: Optional[str] = None
+    use_snowflake_auth: Optional[bool] = None
 
 class UserLogin(BaseModel):
     """User login request model"""
     username: str
     password: str
 
+class PasswordReset(BaseModel):
+    """Password reset request model"""
+    username: str
+    new_password: str
+    reset_token: Optional[str] = None
+
+class PasswordResetRequest(BaseModel):
+    """Password reset request initiation model"""
+    username: str
+
 class User(UserBase):
     id: str
+    is_sso_user: bool = Field(default=False)
+    sso_provider: Optional[str] = None
+    sso_user_id: Optional[str] = None
+    use_snowflake_auth: bool = Field(default=False)
+    last_login: Optional[datetime] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 class UserInDB(User):
-    hashed_password: str
+    hashed_password: Optional[str] = None
+    password_reset_token: Optional[str] = None
+    password_reset_expires: Optional[datetime] = None
 
 # --- Token Models ---
 class Token(BaseModel):
@@ -170,4 +208,59 @@ class ComputePool(BaseModel):
     created_at: datetime
     
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+# --- Analytics Models ---
+class CreditUsage(BaseModel):
+    compute_pool_name: str
+    date: datetime
+    credits_used: float
+    credits_billed: float
+    period_type: str  # 'daily', 'weekly', 'monthly'
+
+class CreditUsageFilter(BaseModel):
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    period_type: str = Field(default="monthly", description="Aggregation period: daily, weekly, monthly")
+    compute_pool_names: Optional[List[str]] = None
+
+class CreditUsageSummary(BaseModel):
+    total_credits_used: float
+    total_credits_billed: float
+    period_start: datetime
+    period_end: datetime
+    compute_pools: List[CreditUsage]
+
+# --- Solution API Key Models ---
+class SolutionAPIKey(BaseModel):
+    id: str
+    solution_id: str
+    key_name: str
+    api_key: str
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    last_used: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+class CreateSolutionAPIKey(BaseModel):
+    key_name: str
+    expires_days: Optional[int] = None  # None means never expires
+
+class SolutionAPIKeyResponse(BaseModel):
+    id: str
+    solution_id: str
+    key_name: str
+    api_key: str  # Only returned on creation
+    is_active: bool
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+class SolutionAPIKeyList(BaseModel):
+    id: str
+    solution_id: str
+    key_name: str
+    api_key_preview: str  # Only show last 4 characters
+    is_active: bool
+    created_at: Optional[datetime] = None
+    last_used: Optional[datetime] = None
+    expires_at: Optional[datetime] = None 

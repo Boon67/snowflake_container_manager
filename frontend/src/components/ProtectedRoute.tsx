@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 import { Spin } from 'antd';
 
 interface ProtectedRouteProps {
@@ -9,7 +10,11 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
+  const { isDarkMode } = useTheme();
   const location = useLocation();
+
+  // Dynamic background for loading state
+  const loadingBg = isDarkMode ? '#1f1f1f' : '#f5f5f5';
 
   if (isLoading) {
     return (
@@ -18,7 +23,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         justifyContent: 'center', 
         alignItems: 'center', 
         height: '100vh',
-        background: '#000000'
+        background: loadingBg
       }}>
         <Spin size="large" />
       </div>

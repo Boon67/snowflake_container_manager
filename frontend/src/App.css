@@ -1,5 +1,6 @@
 .App {
   text-align: center;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Snowflake-inspired theme colors */
@@ -17,9 +18,52 @@
   --snowflake-hover: #E3F2FD;
 }
 
+/* Dark mode specific overrides */
+[data-theme="dark"] {
+  --snowflake-white: #1f1f1f;
+  --snowflake-light-gray: #141414;
+  --snowflake-light-blue: #2a2a2a;
+  --snowflake-border: #404040;
+  --snowflake-hover: #333333;
+  --snowflake-gray: #b1b3b5;
+  --snowflake-dark-gray: #e1e3e5;
+  --snowflake-primary: #4da6d9;
+  --snowflake-secondary: #5a9bd4;
+  --snowflake-accent: #60c5f7;
+}
+
 /* Snowflake theme overrides for Ant Design components */
 .ant-layout {
   background: var(--snowflake-white) !important;
+}
+
+/* Additional dark mode improvements */
+[data-theme="dark"] .ant-switch-checked {
+  background-color: var(--snowflake-primary) !important;
+}
+
+[data-theme="dark"] .ant-tooltip-inner {
+  background-color: var(--snowflake-white) !important;
+  color: var(--snowflake-dark-gray) !important;
+  border: 1px solid var(--snowflake-border) !important;
+}
+
+[data-theme="dark"] .ant-tooltip-arrow-content {
+  background-color: var(--snowflake-white) !important;
+  border: 1px solid var(--snowflake-border) !important;
+}
+
+[data-theme="dark"] .ant-badge-count {
+  background-color: var(--snowflake-primary) !important;
+  color: white !important;
+}
+
+[data-theme="dark"] .ant-tag {
+  border-color: var(--snowflake-border) !important;
+}
+
+[data-theme="dark"] .ant-empty-description {
+  color: var(--snowflake-gray) !important;
 }
 
 .ant-layout-sider {

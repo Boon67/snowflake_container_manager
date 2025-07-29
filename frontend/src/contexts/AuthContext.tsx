@@ -1,11 +1,22 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { message } from 'antd';
+import { App } from 'antd';
 import { api } from '../services/api.ts';
 
 interface User {
   id: string;
   username: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  role: string;
+  is_active: boolean;
+  is_sso_user: boolean;
+  sso_provider?: string;
+  sso_user_id?: string;
+  use_snowflake_auth: boolean;
+  last_login?: string;
   created_at: string;
+  updated_at?: string;
 }
 
 interface AuthContextType {
@@ -25,6 +36,7 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { message } = App.useApp();
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -45,6 +57,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const mockUser: User = {
         id: 'current-user',
         username: 'admin', // This could be decoded from JWT in a real app
+        role: 'admin',
+        is_active: true,
+        is_sso_user: false,
+        use_snowflake_auth: false,
         created_at: new Date().toISOString(),
       };
       setUser(mockUser);
@@ -67,6 +83,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const loggedInUser: User = {
         id: 'current-user',
         username,
+        role: 'admin', // Default to admin for now
+        is_active: true,
+        is_sso_user: false,
+        use_snowflake_auth: false,
         created_at: new Date().toISOString(),
       };
       

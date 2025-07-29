@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Button, Typography, Space, Avatar, Tabs } from 'antd';
+import { Layout, Menu, Button, Typography, Space, Avatar, Tabs, Switch, Tooltip } from 'antd';
 import { 
   DashboardOutlined, 
   UserOutlined, 
@@ -10,13 +10,19 @@ import {
   DatabaseOutlined,
   SettingOutlined,
   TagsOutlined,
+  SunOutlined,
+  MoonOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 import Overview from './Overview.tsx';
 import SolutionManager from './SolutionManager.tsx';
 import ParameterManager from './ParameterManager.tsx';
 import TagManager from './TagManager.tsx';
 import ContainerServiceManager from './ContainerServiceManager.tsx';
+import UserManager from './UserManager.tsx';
+import Analytics from './Analytics.tsx';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -27,6 +33,12 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
   const { user, logout } = useAuth();
+  const { isDarkMode, toggleTheme } = useTheme();
+
+  // Dynamic colors for dark mode compatibility
+  const headerBg = isDarkMode ? undefined : '#FFFFFF';
+  const siderBg = isDarkMode ? undefined : '#0D4F8C';
+  const titleColor = isDarkMode ? 'var(--snowflake-primary)' : '#0D4F8C';
 
   const handleLogout = () => {
     logout();
@@ -85,6 +97,26 @@ const Dashboard: React.FC = () => {
       ),
       children: <TagManager />,
     },
+    ...(user?.role === 'admin' ? [{
+      key: 'users',
+      label: (
+        <span>
+          <UserOutlined />
+          Users
+        </span>
+      ),
+      children: <UserManager />,
+    }] : []),
+    {
+      key: 'analytics',
+      label: (
+        <span>
+          <BarChartOutlined />
+          Analytics
+        </span>
+      ),
+      children: <Analytics />,
+    },
     {
       key: 'container-services',
       label: (
@@ -105,7 +137,7 @@ const Dashboard: React.FC = () => {
         collapsed={collapsed}
         theme="dark"
         style={{
-          background: '#0D4F8C',
+          background: siderBg,
         }}
       >
         <div style={{ 
@@ -126,7 +158,7 @@ const Dashboard: React.FC = () => {
       <Layout>
         <Header style={{ 
           padding: '0 24px', 
-          background: '#FFFFFF',
+          background: headerBg,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -143,12 +175,21 @@ const Dashboard: React.FC = () => {
                 height: 64,
               }}
             />
-            <Title level={4} style={{ margin: 0, color: '#0D4F8C' }}>
+            <Title level={4} style={{ margin: 0, color: titleColor }}>
               Solution Configuration Manager
             </Title>
           </Space>
           
           <Space>
+            <Tooltip title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+              <Switch
+                checked={isDarkMode}
+                onChange={toggleTheme}
+                checkedChildren={<MoonOutlined />}
+                unCheckedChildren={<SunOutlined />}
+                style={{ marginRight: 16 }}
+              />
+            </Tooltip>
             <Avatar icon={<UserOutlined />} />
             <span>{user?.username}</span>
             <Button 
@@ -164,7 +205,6 @@ const Dashboard: React.FC = () => {
         <Content style={{ 
           margin: '24px', 
           padding: '24px',
-          background: '#FFFFFF',
           borderRadius: '8px',
           minHeight: 'calc(100vh - 112px)'
         }}>
