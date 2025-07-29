@@ -13,6 +13,7 @@ import {
   message,
   Empty,
   Tooltip,
+  Tabs,
 } from 'antd';
 import {
   LineChart,
@@ -36,7 +37,7 @@ import {
   DollarOutlined,
   CloudServerOutlined,
 } from '@ant-design/icons';
-import { api, CreditUsage, CreditUsageFilter, CreditUsageSummary } from '../services/api.ts';
+import { api, CreditUsage, CreditUsageFilter, CreditUsageSummary, StorageUsage, DatabaseStorageUsage, StorageUsageSummary } from '../services/api.ts';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import dayjs, { Dayjs } from 'dayjs';
 
@@ -53,29 +54,45 @@ const COLORS = [
 const Analytics: React.FC = () => {
   const { isDarkMode } = useTheme();
   const [creditUsage, setCreditUsage] = useState<CreditUsage[]>([]);
+  const [warehouseUsage, setWarehouseUsage] = useState<any[]>([]);
   const [summary, setSummary] = useState<CreditUsageSummary | null>(null);
+  const [warehouseSummary, setWarehouseSummary] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [warehouseLoading, setWarehouseLoading] = useState(false);
   const [periodType, setPeriodType] = useState<string>('monthly');
   
-  // Default to current month date range
-  const currentMonthStart = dayjs().startOf('month');
-  const currentMonthEnd = dayjs().endOf('month');
-  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>([currentMonthStart, currentMonthEnd]);
+  // Default to current year date range (Jan 1 to current day)
+  const currentYearStart = dayjs().startOf('year');
+  const currentDay = dayjs();
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>([currentYearStart, currentDay]);
   
   const [selectedPools, setSelectedPools] = useState<string[]>([]);
   const [availablePools, setAvailablePools] = useState<string[]>([]);
-  
-  // New state for enhanced analytics
-  const [dailyRollup, setDailyRollup] = useState<any[]>([]);
-  const [heatmapData, setHeatmapData] = useState<any[]>([]);
-  const [rollupLoading, setRollupLoading] = useState(false);
-  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [selectedWarehouses, setSelectedWarehouses] = useState<string[]>([]);
+  const [availableWarehouses, setAvailableWarehouses] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<string>('compute-pools');
+
+  // Storage state
+  const [storageUsage, setStorageUsage] = useState<StorageUsage[]>([]);
+  const [databaseStorageUsage, setDatabaseStorageUsage] = useState<DatabaseStorageUsage[]>([]);
+  const [storageSummary, setStorageSummary] = useState<StorageUsageSummary | null>(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [selectedDatabases, setSelectedDatabases] = useState<string[]>([]);
+  const [availableDatabases, setAvailableDatabases] = useState<string[]>([]);
 
   useEffect(() => {
     loadCreditUsage();
-    loadDailyRollup();
-    loadHeatmapData();
   }, [periodType, dateRange, selectedPools]);
+
+  // Load warehouse data independently
+  useEffect(() => {
+    loadWarehouseUsage();
+  }, [periodType, dateRange, selectedWarehouses]);
+
+  // Load storage data independently
+  useEffect(() => {
+    loadStorageUsage();
+  }, [periodType, dateRange, selectedDatabases]);
 
   const loadCreditUsage = async () => {
     setLoading(true);
@@ -93,7 +110,7 @@ const Analytics: React.FC = () => {
       ]);
 
       setCreditUsage(usageResponse.data);
-      setSummary(summaryResponse.data);
+      setSummary(summaryResponse.data.data); // Extract nested data from {success: true, data: {...}}
 
       // Extract unique pool names for filtering
       const pools = [...new Set(usageResponse.data.map(item => item.compute_pool_name))];
@@ -106,59 +123,70 @@ const Analytics: React.FC = () => {
     }
   };
 
-  const loadDailyRollup = async () => {
-    setRollupLoading(true);
+  const loadWarehouseUsage = async () => {
+    setWarehouseLoading(true);
     try {
       const filter: CreditUsageFilter = {
-        period_type: 'daily',
+        period_type: periodType,
         start_date: dateRange?.[0]?.toISOString(),
         end_date: dateRange?.[1]?.toISOString(),
-        compute_pool_names: selectedPools.length > 0 ? selectedPools : undefined,
+        compute_pool_names: selectedWarehouses.length > 0 ? selectedWarehouses : undefined, // Reuse field for warehouse names
       };
 
-      const response = await api.getDailyCreditRollup(filter);
-      setDailyRollup(response.data.data || []);
+      const [warehouseResponse, warehouseSummaryResponse] = await Promise.all([
+        api.getWarehouseCreditUsage(filter),
+        api.getWarehouseCreditUsageSummary(filter),
+      ]);
+
+      setWarehouseUsage(warehouseResponse.data);
+      setWarehouseSummary(warehouseSummaryResponse.data.data); // Extract nested data from {success: true, data: {...}}
+      
+      // Extract unique warehouse names for filtering
+      const warehouses = [...new Set(warehouseResponse.data.map(item => item.warehouse_name))];
+      setAvailableWarehouses(warehouses);
+
     } catch (error: any) {
-      message.error('Failed to load daily rollup data');
+      message.error('Failed to load warehouse usage data');
     } finally {
-      setRollupLoading(false);
+      setWarehouseLoading(false);
     }
   };
 
-  const loadHeatmapData = async () => {
-    setHeatmapLoading(true);
+  const loadStorageUsage = async () => {
+    setStorageLoading(true);
     try {
-      // For heatmap, use last 7 days if no specific date range is selected, 
-      // otherwise use the selected date range but limit to reasonable timeframe
-      let heatmapStartDate = dateRange?.[0]?.toISOString();
-      let heatmapEndDate = dateRange?.[1]?.toISOString();
-      
-      // If date range is too large (more than 14 days), use last 7 days of the range
-      if (dateRange && dayjs(dateRange[1]).diff(dayjs(dateRange[0]), 'days') > 14) {
-        heatmapStartDate = dayjs(dateRange[1]).subtract(7, 'days').toISOString();
-        heatmapEndDate = dateRange[1].toISOString();
-      }
-      
       const filter: CreditUsageFilter = {
-        period_type: 'hourly',
-        start_date: heatmapStartDate,
-        end_date: heatmapEndDate,
-        compute_pool_names: selectedPools.length > 0 ? selectedPools : undefined,
+        period_type: periodType,
+        start_date: dateRange?.[0]?.toISOString(),
+        end_date: dateRange?.[1]?.toISOString(),
+        compute_pool_names: selectedDatabases.length > 0 ? selectedDatabases : undefined, // Reuse field for database names
       };
 
-      const response = await api.getHourlyHeatmap(filter);
-      setHeatmapData(response.data.data || []);
+      const [storageResponse, databaseStorageResponse, storageSummaryResponse] = await Promise.all([
+        api.getStorageUsage(filter),
+        api.getDatabaseStorageUsage(filter),
+        api.getStorageUsageSummary(filter),
+      ]);
+
+      setStorageUsage(storageResponse.data.data); // Extract nested data from {success: true, data: [...]}
+      setDatabaseStorageUsage(databaseStorageResponse.data.data); // Extract nested data from {success: true, data: [...]}
+      setStorageSummary(storageSummaryResponse.data.data); // Extract nested data from {success: true, data: {...}}
+      
+      // Extract unique database names for filtering
+      const databases = [...new Set(databaseStorageResponse.data.data.map(item => item.database_name))];
+      setAvailableDatabases(databases);
+
     } catch (error: any) {
-      message.error('Failed to load heatmap data');
+      message.error('Failed to load storage usage data');
     } finally {
-      setHeatmapLoading(false);
+      setStorageLoading(false);
     }
   };
 
   const handleRefresh = () => {
     loadCreditUsage();
-    loadDailyRollup();
-    loadHeatmapData();
+    loadWarehouseUsage();
+    loadStorageUsage();
   };
 
   const handlePeriodChange = (value: string) => {
@@ -173,16 +201,95 @@ const Analytics: React.FC = () => {
     setSelectedPools(values);
   };
 
-  // Prepare data for line chart (time series)
-  const prepareTimeSeriesData = () => {
+  const handleWarehousesChange = (values: string[]) => {
+    setSelectedWarehouses(values);
+  };
+
+  const handleDatabasesChange = (values: string[]) => {
+    setSelectedDatabases(values);
+  };
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+  };
+
+  // Generate date range text for chart titles
+  const getDateRangeText = () => {
+    if (!dateRange || !dateRange[0] || !dateRange[1]) {
+      return '';
+    }
+    const startDate = dayjs(dateRange[0]).format('MMM DD, YYYY');
+    const endDate = dayjs(dateRange[1]).format('MMM DD, YYYY');
+    return ` (${startDate} - ${endDate})`;
+  };
+
+  // Prepare data for compute pools time series chart
+  const prepareComputePoolTimeSeriesData = () => {
     const groupedData: Record<string, any> = {};
     
+    // Determine date format and aggregation based on period
+    let dateFormat = 'YYYY-MM-DD';
+    let displayFormat = 'MMM DD';
+    
+    if (periodType === 'weekly') {
+      dateFormat = 'YYYY-[W]WW';
+      displayFormat = '[Week] WW';
+    } else if (periodType === 'monthly') {
+      dateFormat = 'YYYY-MM';
+      displayFormat = 'MMM YYYY';
+    }
+    
     creditUsage.forEach(item => {
-      const dateKey = dayjs(item.date).format('YYYY-MM-DD');
+      const dateKey = dayjs(item.date).format(dateFormat);
       if (!groupedData[dateKey]) {
-        groupedData[dateKey] = { date: dateKey };
+        groupedData[dateKey] = { 
+          date: dateKey,
+          displayDate: dayjs(item.date).format(displayFormat)
+        };
       }
-      groupedData[dateKey][item.compute_pool_name] = item.credits_used;
+      
+      // For stacked charts, we need individual pool values
+      if (!groupedData[dateKey][item.compute_pool_name]) {
+        groupedData[dateKey][item.compute_pool_name] = 0;
+      }
+      groupedData[dateKey][item.compute_pool_name] += item.credits_used;
+    });
+
+    return Object.values(groupedData).sort((a: any, b: any) => 
+      dayjs(a.date).unix() - dayjs(b.date).unix()
+    );
+  };
+
+  // Prepare data for warehouse time series chart using actual warehouse data
+  const prepareWarehouseTimeSeriesData = () => {
+    const groupedData: Record<string, any> = {};
+    
+    // Determine date format and aggregation based on period
+    let dateFormat = 'YYYY-MM-DD';
+    let displayFormat = 'MMM DD';
+    
+    if (periodType === 'weekly') {
+      dateFormat = 'YYYY-[W]WW';
+      displayFormat = '[Week] WW';
+    } else if (periodType === 'monthly') {
+      dateFormat = 'YYYY-MM';
+      displayFormat = 'MMM YYYY';
+    }
+    
+    // Use actual warehouse usage data
+    warehouseUsage.forEach(item => {
+      const dateKey = dayjs(item.date).format(dateFormat);
+      if (!groupedData[dateKey]) {
+        groupedData[dateKey] = { 
+          date: dateKey,
+          displayDate: dayjs(item.date).format(displayFormat)
+        };
+      }
+      
+      if (!groupedData[dateKey][item.warehouse_name]) {
+        groupedData[dateKey][item.warehouse_name] = 0;
+      }
+      groupedData[dateKey][item.warehouse_name] += item.credits_used;
     });
 
     return Object.values(groupedData).sort((a: any, b: any) => 
@@ -218,23 +325,40 @@ const Analytics: React.FC = () => {
     }));
   };
 
-  // Prepare data for daily rollup bar chart
-  const prepareDailyRollupData = () => {
+  // Prepare data for storage usage time series chart
+  const prepareStorageTimeSeriesData = () => {
     const groupedData: Record<string, any> = {};
     
-    dailyRollup.forEach(item => {
-      const dateKey = dayjs(item.date).format('YYYY-MM-DD');
+    // Determine date format and aggregation based on period
+    let dateFormat = 'YYYY-MM-DD';
+    let displayFormat = 'MMM DD';
+    
+    if (periodType === 'weekly') {
+      dateFormat = 'YYYY-[W]WW';
+      displayFormat = '[Week] WW';
+    } else if (periodType === 'monthly') {
+      dateFormat = 'YYYY-MM';
+      displayFormat = 'MMM YYYY';
+    }
+    
+    storageUsage.forEach(item => {
+      const dateKey = dayjs(item.usage_date).format(dateFormat);
       if (!groupedData[dateKey]) {
         groupedData[dateKey] = { 
           date: dateKey,
-          total_credits: 0,
-          peak_hour_credits: 0,
-          active_hours: 0
+          displayDate: dayjs(item.usage_date).format(displayFormat),
+          storage_gb: 0,
+          stage_gb: 0,
+          failsafe_gb: 0,
+          hybrid_gb: 0
         };
       }
-      groupedData[dateKey].total_credits += item.daily_credits_used;
-      groupedData[dateKey].peak_hour_credits = Math.max(groupedData[dateKey].peak_hour_credits, item.peak_hourly_credits);
-      groupedData[dateKey].active_hours = Math.max(groupedData[dateKey].active_hours, item.active_hours);
+      
+      const bytesToGB = 1024 ** 3;
+      groupedData[dateKey].storage_gb += item.storage_bytes / bytesToGB;
+      groupedData[dateKey].stage_gb += item.stage_bytes / bytesToGB;
+      groupedData[dateKey].failsafe_gb += item.failsafe_bytes / bytesToGB;
+      groupedData[dateKey].hybrid_gb += item.hybrid_table_storage_bytes / bytesToGB;
     });
 
     return Object.values(groupedData).sort((a: any, b: any) => 
@@ -242,74 +366,56 @@ const Analytics: React.FC = () => {
     );
   };
 
-  // Prepare data for heatmap visualization
-  const prepareHeatmapData = () => {
-    interface HeatmapCell {
-      hour: number;
-      day: number;
-      value: number;
-      count: number;
-    }
-
-    interface HeatmapDataPoint {
-      hour: number;
-      day: number;
-      dayName: string;
-      hourLabel: string;
-      value: number;
-      totalValue: number;
-      count: number;
-    }
-
-    const heatmapMatrix: HeatmapCell[][] = [];
+  // Prepare data for database storage time series chart
+  const prepareDatabaseStorageTimeSeriesData = () => {
+    const groupedData: Record<string, any> = {};
     
-    // Create 24-hour x 7-day matrix
-    for (let hour = 0; hour < 24; hour++) {
-      const hourData: HeatmapCell[] = [];
-      for (let day = 0; day < 7; day++) {
-        hourData.push({ hour, day, value: 0, count: 0 });
-      }
-      heatmapMatrix.push(hourData);
+    // Determine date format and aggregation based on period
+    let dateFormat = 'YYYY-MM-DD';
+    let displayFormat = 'MMM DD';
+    
+    if (periodType === 'weekly') {
+      dateFormat = 'YYYY-[W]WW';
+      displayFormat = '[Week] WW';
+    } else if (periodType === 'monthly') {
+      dateFormat = 'YYYY-MM';
+      displayFormat = 'MMM YYYY';
     }
-
-    // Aggregate data into the matrix
-    heatmapData.forEach(item => {
-      const date = dayjs(item.date);
-      const dayOfWeek = date.day(); // 0 = Sunday, 1 = Monday, etc.
-      const hour = item.hour;
-      
-      if (hour >= 0 && hour < 24 && dayOfWeek >= 0 && dayOfWeek < 7) {
-        heatmapMatrix[hour][dayOfWeek].value += item.credits_used;
-        heatmapMatrix[hour][dayOfWeek].count += 1;
+    
+    databaseStorageUsage.forEach(item => {
+      const dateKey = dayjs(item.usage_date).format(dateFormat);
+      if (!groupedData[dateKey]) {
+        groupedData[dateKey] = { 
+          date: dateKey,
+          displayDate: dayjs(item.usage_date).format(displayFormat)
+        };
       }
+      
+      const bytesToGB = 1024 ** 3;
+      if (!groupedData[dateKey][item.database_name]) {
+        groupedData[dateKey][item.database_name] = 0;
+      }
+      groupedData[dateKey][item.database_name] += item.total_bytes / bytesToGB;
     });
 
-    // Calculate averages and flatten for recharts
-    const flattenedData: HeatmapDataPoint[] = [];
-    for (let hour = 0; hour < 24; hour++) {
-      for (let day = 0; day < 7; day++) {
-        const cell = heatmapMatrix[hour][day];
-        flattenedData.push({
-          hour: hour,
-          day: day,
-          dayName: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day],
-          hourLabel: `${hour.toString().padStart(2, '0')}:00`,
-          value: cell.count > 0 ? cell.value / cell.count : 0,
-          totalValue: cell.value,
-          count: cell.count
-        });
-      }
-    }
-
-    return flattenedData;
+    return Object.values(groupedData).sort((a: any, b: any) => 
+      dayjs(a.date).unix() - dayjs(b.date).unix()
+    );
   };
 
-  const timeSeriesData = prepareTimeSeriesData();
+  const computePoolTimeSeriesData = prepareComputePoolTimeSeriesData();
+  const warehouseTimeSeriesData = prepareWarehouseTimeSeriesData();
+  const storageTimeSeriesData = prepareStorageTimeSeriesData();
+  const databaseStorageTimeSeriesData = prepareDatabaseStorageTimeSeriesData();
   const poolComparisonData = preparePoolComparisonData();
   const pieData = preparePieData();
   const uniquePools = [...new Set(creditUsage.map(item => item.compute_pool_name))];
-  const dailyRollupData = prepareDailyRollupData();
-  const processedHeatmapData = prepareHeatmapData();
+  const uniqueWarehouses = [...new Set(warehouseTimeSeriesData.flatMap(item => 
+    Object.keys(item).filter(key => key !== 'date' && key !== 'displayDate')
+  ))];
+  const uniqueDatabases = [...new Set(databaseStorageTimeSeriesData.flatMap(item => 
+    Object.keys(item).filter(key => key !== 'date' && key !== 'displayDate')
+  ))];
 
   return (
     <div>
@@ -357,280 +463,591 @@ const Analytics: React.FC = () => {
             <Select
               mode="multiple"
               style={{ width: '100%' }}
-              placeholder="Filter by compute pools"
-              value={selectedPools}
-              onChange={handlePoolsChange}
+              placeholder={
+                activeTab === 'warehouses' ? "Filter by warehouses" :
+                activeTab === 'storage' ? "Filter by databases" :
+                "Filter by compute pools"
+              }
+              value={
+                activeTab === 'warehouses' ? selectedWarehouses :
+                activeTab === 'storage' ? selectedDatabases :
+                selectedPools
+              }
+              onChange={
+                activeTab === 'warehouses' ? handleWarehousesChange :
+                activeTab === 'storage' ? handleDatabasesChange :
+                handlePoolsChange
+              }
               allowClear
             >
-              {availablePools.map(pool => (
-                <Option key={pool} value={pool}>{pool}</Option>
+              {(
+                activeTab === 'warehouses' ? availableWarehouses :
+                activeTab === 'storage' ? availableDatabases :
+                availablePools
+              ).map(item => (
+                <Option key={item} value={item}>{item}</Option>
               ))}
             </Select>
           </Col>
         </Row>
 
         {/* Summary Statistics */}
-        {summary && (
-          <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
-            <Col xs={24} sm={8}>
-              <Card>
-                <Statistic
-                  title="Total Credits Used"
-                  value={summary.total_credits_used}
-                  precision={2}
-                  prefix={<DollarOutlined style={{ color: '#52c41a' }} />}
-                  suffix="credits"
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Card>
-                <Statistic
-                  title="Total Credits Billed"
-                  value={summary.total_credits_billed}
-                  precision={2}
-                  prefix={<DollarOutlined style={{ color: '#faad14' }} />}
-                  suffix="credits"
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Card>
-                <Statistic
-                  title="Active Compute Pools"
-                  value={uniquePools.length}
-                  prefix={<CloudServerOutlined style={{ color: '#1890ff' }} />}
-                />
-              </Card>
-            </Col>
-          </Row>
-        )}
+        <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
+          <Col xs={24} sm={4}>
+            <Card>
+              <Statistic
+                title="Total Credits Used"
+                value={(summary?.total_credits_used || 0) + (warehouseSummary?.total_credits_used || 0)}
+                precision={2}
+                prefix={<DollarOutlined style={{ color: '#52c41a' }} />}
+                suffix="credits"
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={4}>
+            <Card>
+              <Statistic
+                title="Average Credits per Day"
+                value={(() => {
+                  if (!dateRange || !dateRange[0] || !dateRange[1]) return 0;
+                  const totalCredits = (summary?.total_credits_used || 0) + (warehouseSummary?.total_credits_used || 0);
+                  const daysDiff = dateRange[1].diff(dateRange[0], 'days') + 1; // +1 to include both start and end days
+                  return daysDiff > 0 ? totalCredits / daysDiff : 0;
+                })()}
+                precision={2}
+                prefix={<DollarOutlined style={{ color: '#faad14' }} />}
+                suffix="credits/day"
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={4}>
+            <Card>
+              <Statistic
+                title="Total Storage"
+                value={storageSummary?.total_storage_gb || 0}
+                precision={1}
+                prefix={<CloudServerOutlined style={{ color: '#f56a00' }} />}
+                suffix="GB"
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={4}>
+            <Card>
+              <Statistic
+                title="Active Compute Pools"
+                value={uniquePools.length}
+                prefix={<CloudServerOutlined style={{ color: '#1890ff' }} />}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={4}>
+            <Card>
+              <Statistic
+                title="Active Warehouses"
+                value={uniqueWarehouses.length}
+                prefix={<CloudServerOutlined style={{ color: '#722ed1' }} />}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={4}>
+            <Card>
+              <Statistic
+                title="Active Databases"
+                value={storageSummary?.active_databases || 0}
+                prefix={<CloudServerOutlined style={{ color: '#13c2c2' }} />}
+              />
+            </Card>
+          </Col>
+        </Row>
 
-        <Spin spinning={loading}>
-          {creditUsage.length > 0 || dailyRollup.length > 0 || processedHeatmapData.length > 0 ? (
-            <Row gutter={[16, 24]}>
-              {/* Time Series Chart */}
-              {creditUsage.length > 0 ? (
-                <Col xs={24}>
-                  <Card title="Credit Usage Over Time" style={{ marginBottom: 16 }}>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <LineChart data={timeSeriesData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="date" 
-                          tick={{ fontSize: 12 }}
-                          tickFormatter={(value) => dayjs(value).format('MMM DD')}
+        <Spin spinning={loading || warehouseLoading || storageLoading}>
+          {(creditUsage.length > 0 || warehouseUsage.length > 0 || storageUsage.length > 0) ? (
+            <Tabs defaultActiveKey="compute-pools" style={{ marginTop: 24 }} onChange={handleTabChange}>
+              <Tabs.TabPane tab="Compute Pools" key="compute-pools">
+                {/* Compute Pool Summary Statistics */}
+                {summary && (
+                  <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                    <Col xs={24} sm={8}>
+                      <Card>
+                        <Statistic
+                          title="Compute Pool Credits Used"
+                          value={summary.total_credits_used}
+                          precision={2}
+                          prefix={<DollarOutlined style={{ color: '#52c41a' }} />}
+                          suffix="credits"
                         />
-                        <YAxis tick={{ fontSize: 12 }} />
-                        <RechartsTooltip 
-                          labelFormatter={(value) => dayjs(value).format('MMMM DD, YYYY')}
-                          formatter={(value: number) => [value.toFixed(2) + ' credits', 'Credits Used']}
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                      <Card>
+                        <Statistic
+                          title="Avg Compute Pool Credits/Day"
+                          value={(() => {
+                            if (!dateRange || !dateRange[0] || !dateRange[1]) return 0;
+                            const daysDiff = dateRange[1].diff(dateRange[0], 'days') + 1;
+                            return daysDiff > 0 ? summary.total_credits_used / daysDiff : 0;
+                          })()}
+                          precision={2}
+                          prefix={<DollarOutlined style={{ color: '#faad14' }} />}
+                          suffix="credits/day"
                         />
-                        <Legend />
-                        {uniquePools.map((pool, index) => (
-                          <Line
-                            key={pool}
-                            type="monotone"
-                            dataKey={pool}
-                            stroke={COLORS[index % COLORS.length]}
-                            strokeWidth={2}
-                            dot={{ strokeWidth: 2, r: 4 }}
-                            activeDot={{ r: 6 }}
-                          />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </Card>
-                </Col>
-              ) : (
-                <Col xs={24}>
-                  <Card title="Credit Usage Over Time" style={{ marginBottom: 16 }}>
-                    <Empty 
-                      description="No credit usage data available for the selected time period"
-                      style={{ margin: '40px 0' }}
-                    />
-                  </Card>
-                </Col>
-              )}
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={8}>
+                      <Card>
+                        <Statistic
+                          title="Active Compute Pools"
+                          value={uniquePools.length}
+                          prefix={<CloudServerOutlined style={{ color: '#1890ff' }} />}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+                )}
 
-              {/* Pool Comparison Bar Chart */}
-              {creditUsage.length > 0 ? (
-                <Col xs={24} lg={12}>
-                  <Card title="Credit Usage by Compute Pool">
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={poolComparisonData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="pool_name" 
-                          tick={{ fontSize: 11 }}
-                          angle={-45}
-                          textAnchor="end"
-                          height={80}
-                        />
-                        <YAxis tick={{ fontSize: 12 }} />
-                        <RechartsTooltip 
-                          formatter={(value: number) => [value.toFixed(2) + ' credits', 'Total Credits Used']}
-                        />
-                        <Bar dataKey="credits_used" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </Card>
-                </Col>
-              ) : (
-                <Col xs={24} lg={12}>
-                  <Card title="Credit Usage by Compute Pool">
-                    <Empty description="No compute pool data available" />
-                  </Card>
-                </Col>
-              )}
-
-              {/* Pie Chart */}
-              {creditUsage.length > 0 ? (
-                <Col xs={24} lg={12}>
-                  <Card title="Credit Distribution">
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={pieData}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {pieData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.fill} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip 
-                          formatter={(value: number) => [value.toFixed(2) + ' credits', 'Credits Used']}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </Card>
-                </Col>
-              ) : (
-                <Col xs={24} lg={12}>
-                  <Card title="Credit Distribution">
-                    <Empty description="No credit distribution data available" />
-                  </Card>
-                </Col>
-              )}
-
-              {/* Daily Rollup Chart */}
-              <Col xs={24}>
-                <Card title="Daily Credit Usage Rollup" style={{ marginTop: 16 }}>
-                  <Spin spinning={rollupLoading}>
-                    {dailyRollupData.length > 0 ? (
+                <Row gutter={[16, 24]}>
+                  {/* Compute Pool Time Series Chart */}
+                  <Col xs={24}>
+                    <Card title={`Compute Pool Credit Usage${getDateRangeText()}`} style={{ marginBottom: 16 }}>
                       <ResponsiveContainer width="100%" height={400}>
-                        <BarChart data={dailyRollupData}>
+                        {(periodType === 'weekly' || periodType === 'monthly') ? (
+                          <BarChart data={computePoolTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(2) + ' credits', name]}
+                            />
+                            <Legend />
+                            {uniquePools.map((pool, index) => (
+                              <Bar
+                                key={pool}
+                                dataKey={pool}
+                                stackId="credits"
+                                fill={COLORS[index % COLORS.length]}
+                                name={pool}
+                              />
+                            ))}
+                          </BarChart>
+                        ) : (
+                          <LineChart data={computePoolTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(2) + ' credits', name]}
+                            />
+                            <Legend />
+                            {uniquePools.map((pool, index) => (
+                              <Line
+                                key={pool}
+                                type="monotone"
+                                dataKey={pool}
+                                stroke={COLORS[index % COLORS.length]}
+                                strokeWidth={2}
+                                dot={{ strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                                name={pool}
+                              />
+                            ))}
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+
+                  {/* Pool Comparison Bar Chart */}
+                  <Col xs={24} lg={12}>
+                    <Card title="Credit Usage by Compute Pool">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={poolComparisonData}>
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis 
-                            dataKey="date" 
-                            tick={{ fontSize: 12 }}
-                            tickFormatter={(value) => dayjs(value).format('MMM DD')}
+                            dataKey="pool_name" 
+                            tick={{ fontSize: 11 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
                           />
                           <YAxis tick={{ fontSize: 12 }} />
                           <RechartsTooltip 
-                            labelFormatter={(value) => dayjs(value).format('MMMM DD, YYYY')}
-                            formatter={(value: number, name: string) => [
-                              value.toFixed(2), 
-                              name === 'total_credits' ? 'Total Credits' :
-                              name === 'peak_hour_credits' ? 'Peak Hour Credits' : 
-                              name === 'active_hours' ? 'Active Hours' : name
-                            ]}
+                            formatter={(value: number) => [value.toFixed(2) + ' credits', 'Total Credits Used']}
                           />
-                          <Legend />
-                          <Bar dataKey="total_credits" fill="#1890ff" name="Total Credits" />
-                          <Bar dataKey="peak_hour_credits" fill="#52c41a" name="Peak Hour Credits" />
+                          <Bar dataKey="credits_used" />
                         </BarChart>
                       </ResponsiveContainer>
-                    ) : (
-                      <Empty description="No daily rollup data available" />
-                    )}
-                  </Spin>
-                </Card>
-              </Col>
+                    </Card>
+                  </Col>
 
-              {/* Heatmap */}
-              <Col xs={24}>
-                <Card title={`Credit Usage Heatmap (By Hour of Day)${dateRange && dayjs(dateRange[1]).diff(dayjs(dateRange[0]), 'days') > 14 ? ' - Last 7 Days' : ''}`} style={{ marginTop: 16 }}>
-                  <Spin spinning={heatmapLoading}>
-                    {processedHeatmapData.length > 0 ? (
-                      <div style={{ overflowX: 'auto' }}>
-                        <div style={{ minWidth: '800px', display: 'grid', gridTemplateColumns: 'auto repeat(7, 1fr)', gap: '2px', padding: '20px' }}>
-                          {/* Header row */}
-                          <div></div>
-                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                            <div key={day} style={{ textAlign: 'center', fontWeight: 'bold', padding: '8px' }}>
-                              {day}
-                            </div>
-                          ))}
-                          
-                          {/* Hour rows */}
-                          {Array.from({ length: 24 }, (_, hour) => [
-                            <div key={`hour-${hour}`} style={{ 
-                              textAlign: 'center', 
-                              fontWeight: 'bold', 
-                              padding: '8px',
-                              fontSize: '12px'
-                            }}>
-                              {hour.toString().padStart(2, '0')}:00
-                            </div>,
-                            ...Array.from({ length: 7 }, (_, day) => {
-                              const cellData = processedHeatmapData.find(d => d.hour === hour && d.day === day);
-                              const value = cellData?.value || 0;
-                              const maxValue = Math.max(...processedHeatmapData.map(d => d.value));
-                              const intensity = maxValue > 0 ? value / maxValue : 0;
-                              
-                              return (
-                                <Tooltip 
-                                  key={`${hour}-${day}`}
-                                  title={`${cellData?.dayName} ${cellData?.hourLabel}: ${value.toFixed(2)} credits`}
-                                >
-                                  <div style={{
-                                    width: '40px',
-                                    height: '25px',
-                                    backgroundColor: `rgba(24, 144, 255, ${intensity})`,
-                                    border: '1px solid #d9d9d9',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                    fontSize: '10px',
-                                    color: intensity > 0.5 ? 'white' : 'black'
-                                  }}>
-                                    {value > 0 ? value.toFixed(1) : ''}
-                                  </div>
-                                </Tooltip>
-                              );
-                            })
-                          ]).flat()}
-                        </div>
-                        <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                          <Text type="secondary" style={{ fontSize: '12px' }}>
-                            Color intensity indicates relative credit usage. Hover over cells for details.
-                          </Text>
-                        </div>
-                      </div>
-                    ) : (
-                      <Empty description="No heatmap data available" />
-                    )}
-                  </Spin>
-                </Card>
-              </Col>
-            </Row>
+                  {/* Compute Pool Pie Chart */}
+                  <Col xs={24} lg={12}>
+                    <Card title="Compute Pool Credit Distribution">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                          <Pie
+                            data={pieData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {pieData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.fill} />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip 
+                            formatter={(value: number) => [value.toFixed(2) + ' credits', 'Credits Used']}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+                </Row>
+              </Tabs.TabPane>
+
+              <Tabs.TabPane tab="Data Warehouses" key="warehouses">
+                {/* Warehouse Summary Statistics */}
+                {warehouseSummary && (
+                  <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Total Warehouse Credits"
+                          value={warehouseSummary.total_credits_used}
+                          precision={2}
+                          prefix={<DollarOutlined style={{ color: '#52c41a' }} />}
+                          suffix="credits"
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Compute Credits"
+                          value={warehouseSummary.total_credits_compute}
+                          precision={2}
+                          prefix={<DollarOutlined style={{ color: '#1890ff' }} />}
+                          suffix="credits"
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Cloud Services Credits"
+                          value={warehouseSummary.total_credits_cloud_services}
+                          precision={2}
+                          prefix={<DollarOutlined style={{ color: '#722ed1' }} />}
+                          suffix="credits"
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Active Warehouses"
+                          value={uniqueWarehouses.length}
+                          prefix={<CloudServerOutlined style={{ color: '#fa8c16' }} />}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+                )}
+
+                <Row gutter={[16, 24]}>
+                  {/* Warehouse Time Series Chart */}
+                  <Col xs={24}>
+                    <Card title={`Warehouse Credit Usage${getDateRangeText()}`} style={{ marginBottom: 16 }}>
+                      <ResponsiveContainer width="100%" height={400}>
+                        {(periodType === 'weekly' || periodType === 'monthly') ? (
+                          <BarChart data={warehouseTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(2) + ' credits', name]}
+                            />
+                            <Legend />
+                            {uniqueWarehouses.map((warehouse, index) => (
+                              <Bar
+                                key={warehouse}
+                                dataKey={warehouse}
+                                stackId="credits"
+                                fill={COLORS[index % COLORS.length]}
+                                name={warehouse}
+                              />
+                            ))}
+                          </BarChart>
+                        ) : (
+                          <LineChart data={warehouseTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(2) + ' credits', name]}
+                            />
+                            <Legend />
+                            {uniqueWarehouses.map((warehouse, index) => (
+                              <Line
+                                key={warehouse}
+                                type="monotone"
+                                dataKey={warehouse}
+                                stroke={COLORS[index % COLORS.length]}
+                                strokeWidth={2}
+                                dot={{ strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                                name={warehouse}
+                              />
+                            ))}
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+
+                  {/* Warehouse Comparison Bar Chart */}
+                  <Col xs={24} lg={12}>
+                    <Card title="Credit Usage by Warehouse">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={uniqueWarehouses.map((warehouse, index) => ({
+                          warehouse_name: warehouse,
+                          credits_used: warehouseTimeSeriesData.reduce((sum, item) => sum + (item[warehouse] || 0), 0),
+                          fill: COLORS[index % COLORS.length],
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="warehouse_name" 
+                            tick={{ fontSize: 11 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                          />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <RechartsTooltip 
+                            formatter={(value: number) => [value.toFixed(2) + ' credits', 'Total Credits Used']}
+                          />
+                          <Bar dataKey="credits_used" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+
+                  {/* Warehouse Pie Chart */}
+                  <Col xs={24} lg={12}>
+                    <Card title="Warehouse Credit Distribution">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                          <Pie
+                            data={uniqueWarehouses.map((warehouse, index) => ({
+                              name: warehouse,
+                              value: warehouseTimeSeriesData.reduce((sum, item) => sum + (item[warehouse] || 0), 0),
+                              fill: COLORS[index % COLORS.length],
+                            }))}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {uniqueWarehouses.map((warehouse, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip 
+                            formatter={(value: number) => [value.toFixed(2) + ' credits', 'Credits Used']}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+                </Row>
+              </Tabs.TabPane>
+
+              <Tabs.TabPane tab="Storage" key="storage">
+                {/* Storage Summary Statistics */}
+                {storageSummary && (
+                  <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Total Storage"
+                          value={storageSummary.total_storage_gb}
+                          precision={1}
+                          prefix={<CloudServerOutlined style={{ color: '#f56a00' }} />}
+                          suffix="GB"
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Average Storage per Day"
+                          value={storageSummary.average_storage_per_day_gb}
+                          precision={1}
+                          prefix={<CloudServerOutlined style={{ color: '#faad14' }} />}
+                          suffix="GB/day"
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Failsafe Storage"
+                          value={storageSummary.total_failsafe_gb}
+                          precision={1}
+                          prefix={<CloudServerOutlined style={{ color: '#1890ff' }} />}
+                          suffix="GB"
+                        />
+                      </Card>
+                    </Col>
+                    <Col xs={24} sm={6}>
+                      <Card>
+                        <Statistic
+                          title="Active Databases"
+                          value={storageSummary.active_databases}
+                          prefix={<CloudServerOutlined style={{ color: '#13c2c2' }} />}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+                )}
+
+                <Row gutter={[16, 24]}>
+                  {/* Storage Time Series Chart */}
+                  <Col xs={24}>
+                    <Card title={`Storage Usage Over Time${getDateRangeText()}`} style={{ marginBottom: 16 }}>
+                      <ResponsiveContainer width="100%" height={400}>
+                        {(periodType === 'weekly' || periodType === 'monthly') ? (
+                          <BarChart data={storageTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(1) + ' GB', name]}
+                            />
+                            <Legend />
+                            <Bar dataKey="storage_gb" stackId="storage" fill="#1890ff" name="Table Storage" />
+                            <Bar dataKey="stage_gb" stackId="storage" fill="#52c41a" name="Stage Storage" />
+                            <Bar dataKey="failsafe_gb" stackId="storage" fill="#faad14" name="Failsafe Storage" />
+                            <Bar dataKey="hybrid_gb" stackId="storage" fill="#722ed1" name="Hybrid Storage" />
+                          </BarChart>
+                        ) : (
+                          <LineChart data={storageTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(1) + ' GB', name]}
+                            />
+                            <Legend />
+                            <Line type="monotone" dataKey="storage_gb" stroke="#1890ff" strokeWidth={2} name="Table Storage" />
+                            <Line type="monotone" dataKey="stage_gb" stroke="#52c41a" strokeWidth={2} name="Stage Storage" />
+                            <Line type="monotone" dataKey="failsafe_gb" stroke="#faad14" strokeWidth={2} name="Failsafe Storage" />
+                            <Line type="monotone" dataKey="hybrid_gb" stroke="#722ed1" strokeWidth={2} name="Hybrid Storage" />
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+
+                  {/* Database Storage Chart */}
+                  <Col xs={24}>
+                    <Card title={`Database Storage Usage${getDateRangeText()}`} style={{ marginBottom: 16 }}>
+                      <ResponsiveContainer width="100%" height={400}>
+                        {(periodType === 'weekly' || periodType === 'monthly') ? (
+                          <BarChart data={databaseStorageTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(1) + ' GB', name]}
+                            />
+                            <Legend />
+                            {uniqueDatabases.map((database, index) => (
+                              <Bar
+                                key={database}
+                                dataKey={database}
+                                stackId="storage"
+                                fill={COLORS[index % COLORS.length]}
+                                name={database}
+                              />
+                            ))}
+                          </BarChart>
+                        ) : (
+                          <LineChart data={databaseStorageTimeSeriesData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis 
+                              dataKey="displayDate" 
+                              tick={{ fontSize: 12 }}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <RechartsTooltip 
+                              labelFormatter={(value) => value}
+                              formatter={(value: number, name: string) => [value.toFixed(1) + ' GB', name]}
+                            />
+                            <Legend />
+                            {uniqueDatabases.map((database, index) => (
+                              <Line
+                                key={database}
+                                type="monotone"
+                                dataKey={database}
+                                stroke={COLORS[index % COLORS.length]}
+                                strokeWidth={2}
+                                dot={{ strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                                name={database}
+                              />
+                            ))}
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Card>
+                  </Col>
+                </Row>
+              </Tabs.TabPane>
+            </Tabs>
           ) : (
             <Empty
-              description="No compute pool credit usage data available"
+              description="No analytics data available"
               style={{ margin: '40px 0' }}
             >
               <Text type="secondary">
-                No compute pools have recorded credit usage for the selected time period. 
-                Credit usage data comes from Snowflake's ACCOUNT_USAGE.COMPUTE_POOL_METERING_HISTORY table.
-                Try selecting a different date range or check if compute pools are actively running.
+                No analytics data is available for the selected time period. 
+                This could be due to no active compute pools, warehouses, or storage usage.
+                Try selecting a different date range or check if resources are actively being used.
               </Text>
             </Empty>
           )}

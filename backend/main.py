@@ -1619,7 +1619,7 @@ async def get_credit_usage(
         logger.error(f"Error getting credit usage: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve credit usage data")
 
-@app.post("/api/analytics/credit-usage-summary", response_model=models.CreditUsageSummary)
+@app.post("/api/analytics/credit-usage-summary")
 async def get_credit_usage_summary(
     filter_params: models.CreditUsageFilter,
     current_user: models.User = Depends(auth.get_current_active_user)
@@ -1634,27 +1634,7 @@ async def get_credit_usage_summary(
             compute_pool_names=filter_params.compute_pool_names
         )
         
-        # Convert individual usage items
-        credit_usage = []
-        for usage in summary_data['compute_pools']:
-            credit = models.CreditUsage(
-                compute_pool_name=usage['compute_pool_name'],
-                date=usage['date'],
-                credits_used=usage['credits_used'],
-                credits_billed=usage['credits_billed'],
-                period_type=usage['period_type']
-            )
-            credit_usage.append(credit)
-        
-        summary = models.CreditUsageSummary(
-            total_credits_used=summary_data['total_credits_used'],
-            total_credits_billed=summary_data['total_credits_billed'],
-            period_start=summary_data['period_start'],
-            period_end=summary_data['period_end'],
-            compute_pools=credit_usage
-        )
-        
-        return summary
+        return {"success": True, "data": summary_data}
     except Exception as e:
         logger.error(f"Error getting credit usage summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve credit usage summary")
@@ -1722,6 +1702,170 @@ async def get_hourly_heatmap(
     except Exception as e:
         logger.error(f"Error in hourly heatmap endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve hourly heatmap: {str(e)}")
+
+# --- Warehouse Analytics Endpoints ---
+@app.post("/api/analytics/warehouse-credit-usage")
+async def get_warehouse_credit_usage(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get credit usage data for warehouses"""
+    db = get_database()
+    try:
+        logger.info(f"Warehouse credit usage request: {filter_params}")
+        
+        start_date = None
+        end_date = None
+        if filter_params.start_date:
+            # Handle both string and datetime inputs
+            if isinstance(filter_params.start_date, str):
+                start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+            else:
+                start_date = filter_params.start_date
+        if filter_params.end_date:
+            # Handle both string and datetime inputs
+            if isinstance(filter_params.end_date, str):
+                end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+            else:
+                end_date = filter_params.end_date
+        
+        logger.info(f"Parsed dates: start={start_date}, end={end_date}, period={filter_params.period_type}, warehouses={filter_params.compute_pool_names}")
+        
+        usage_data = db.get_warehouse_credit_usage(
+            start_date=start_date,
+            end_date=end_date,
+            period_type=filter_params.period_type,
+            warehouse_names=filter_params.compute_pool_names  # Reuse the filter field for warehouse names
+        )
+        
+        logger.info(f"Warehouse query completed successfully: {len(usage_data)} records")
+        return usage_data
+    except Exception as e:
+        logger.error(f"Error getting warehouse credit usage: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve warehouse credit usage data")
+
+@app.post("/api/analytics/warehouse-credit-usage-summary")
+async def get_warehouse_credit_usage_summary(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get warehouse credit usage summary"""
+    db = get_database()
+    try:
+        # Handle both string and datetime inputs for start_date and end_date
+        start_date = filter_params.start_date
+        end_date = filter_params.end_date
+        
+        if isinstance(filter_params.start_date, str):
+            start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+        if isinstance(filter_params.end_date, str):
+            end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+        
+        summary = db.get_warehouse_credit_usage_summary(
+            start_date=start_date,
+            end_date=end_date,
+            period_type=filter_params.period_type,
+            warehouse_names=filter_params.compute_pool_names  # Reuse field for warehouse names
+        )
+        
+        return {"success": True, "data": summary}
+    except Exception as e:
+        logger.error(f"Error getting warehouse credit usage summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve warehouse credit usage summary")
+
+# Storage Analytics Endpoints
+@app.post("/api/analytics/storage-usage")
+async def get_storage_usage(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get storage usage data"""
+    db = get_database()
+    try:
+        # Handle both string and datetime inputs for start_date and end_date
+        start_date = filter_params.start_date
+        end_date = filter_params.end_date
+        
+        if isinstance(filter_params.start_date, str):
+            start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+        if isinstance(filter_params.end_date, str):
+            end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+        
+        logger.info(f"Storage usage request: start_date={start_date} end_date={end_date} period_type='{filter_params.period_type}'")
+        
+        storage_usage = db.get_storage_usage(
+            start_date=start_date,
+            end_date=end_date,
+            period_type=filter_params.period_type
+        )
+        
+        logger.info(f"Storage usage query completed successfully: {len(storage_usage)} records")
+        return {"success": True, "data": storage_usage}
+    except Exception as e:
+        logger.error(f"Error getting storage usage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve storage usage data")
+
+@app.post("/api/analytics/storage-usage-summary")
+async def get_storage_usage_summary(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get storage usage summary"""
+    db = get_database()
+    try:
+        # Handle both string and datetime inputs for start_date and end_date
+        start_date = filter_params.start_date
+        end_date = filter_params.end_date
+        
+        if isinstance(filter_params.start_date, str):
+            start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+        if isinstance(filter_params.end_date, str):
+            end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+        
+        summary = db.get_storage_usage_summary(
+            start_date=start_date,
+            end_date=end_date,
+            period_type=filter_params.period_type
+        )
+        
+        return {"success": True, "data": summary}
+    except Exception as e:
+        logger.error(f"Error getting storage usage summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve storage usage summary")
+
+@app.post("/api/analytics/database-storage-usage")
+async def get_database_storage_usage(
+    filter_params: models.CreditUsageFilter,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get database storage usage data"""
+    db = get_database()
+    try:
+        # Handle both string and datetime inputs for start_date and end_date
+        start_date = filter_params.start_date
+        end_date = filter_params.end_date
+        
+        if isinstance(filter_params.start_date, str):
+            start_date = datetime.fromisoformat(filter_params.start_date.replace('Z', '+00:00'))
+        if isinstance(filter_params.end_date, str):
+            end_date = datetime.fromisoformat(filter_params.end_date.replace('Z', '+00:00'))
+        
+        logger.info(f"Database storage usage request: start_date={start_date} end_date={end_date} period_type='{filter_params.period_type}' databases={filter_params.compute_pool_names}")
+        
+        database_storage = db.get_database_storage_usage(
+            start_date=start_date,
+            end_date=end_date,
+            period_type=filter_params.period_type,
+            database_names=filter_params.compute_pool_names  # Reuse field for database names
+        )
+        
+        logger.info(f"Database storage usage query completed successfully: {len(database_storage)} records")
+        return {"success": True, "data": database_storage}
+    except Exception as e:
+        logger.error(f"Error getting database storage usage: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve database storage usage data")
 
 if __name__ == "__main__":
     import uvicorn

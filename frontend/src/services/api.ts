@@ -130,9 +130,37 @@ export interface CreditUsageFilter {
 export interface CreditUsageSummary {
   total_credits_used: number;
   total_credits_billed: number;
-  period_start: string;
-  period_end: string;
-  compute_pools: CreditUsage[];
+  active_compute_pools: number;
+}
+
+// Storage Usage Interfaces
+export interface StorageUsage {
+  usage_date: string;
+  storage_bytes: number;
+  stage_bytes: number;
+  failsafe_bytes: number;
+  hybrid_table_storage_bytes: number;
+  total_bytes: number;
+  period_type: string;
+}
+
+export interface DatabaseStorageUsage {
+  database_name: string;
+  usage_date: string;
+  storage_bytes: number;
+  failsafe_bytes: number;
+  hybrid_table_storage_bytes: number;
+  total_bytes: number;
+  period_type: string;
+}
+
+export interface StorageUsageSummary {
+  total_storage_gb: number;
+  total_stage_gb: number;
+  total_failsafe_gb: number;
+  total_hybrid_gb: number;
+  active_databases: number;
+  average_storage_per_day_gb: number;
 }
 
 // Solution API Key Interfaces
@@ -215,7 +243,7 @@ export interface BulkParameterOperation {
 export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;
-  data?: T;
+  data: T;
 }
 
 class ApiService {
@@ -409,16 +437,29 @@ class ApiService {
     return this.post('/analytics/credit-usage', filter);
   }
 
-  async getCreditUsageSummary(filter: CreditUsageFilter): Promise<AxiosResponse<CreditUsageSummary>> {
+  async getCreditUsageSummary(filter: CreditUsageFilter): Promise<AxiosResponse<ApiResponse<CreditUsageSummary>>> {
     return this.post('/analytics/credit-usage-summary', filter);
   }
 
-  async getDailyCreditRollup(filter: CreditUsageFilter): Promise<AxiosResponse<any>> {
-    return this.post('/analytics/daily-credit-rollup', filter);
+  async getWarehouseCreditUsage(filter: CreditUsageFilter): Promise<AxiosResponse<any[]>> {
+    return this.post('/analytics/warehouse-credit-usage', filter);
   }
 
-  async getHourlyHeatmap(filter: CreditUsageFilter): Promise<AxiosResponse<any>> {
-    return this.post('/analytics/hourly-heatmap', filter);
+  async getWarehouseCreditUsageSummary(filter: CreditUsageFilter): Promise<AxiosResponse<ApiResponse<any>>> {
+    return this.post('/analytics/warehouse-credit-usage-summary', filter);
+  }
+
+  // Storage Usage
+  async getStorageUsage(filter: CreditUsageFilter): Promise<AxiosResponse<ApiResponse<StorageUsage[]>>> {
+    return this.post('/analytics/storage-usage', filter);
+  }
+
+  async getDatabaseStorageUsage(filter: CreditUsageFilter): Promise<AxiosResponse<ApiResponse<DatabaseStorageUsage[]>>> {
+    return this.post('/analytics/database-storage-usage', filter);
+  }
+
+  async getStorageUsageSummary(filter: CreditUsageFilter): Promise<AxiosResponse<ApiResponse<StorageUsageSummary>>> {
+    return this.post('/analytics/storage-usage-summary', filter);
   }
 
   // Solution Export

@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import uuid
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -880,29 +880,20 @@ class SnowflakeConnection:
         usage_data = self.get_credit_usage(start_date, end_date, period_type, compute_pool_names)
         
         if not usage_data:
-            from datetime import datetime, timedelta
-            if not end_date:
-                end_date = datetime.now()
-            if not start_date:
-                start_date = end_date - timedelta(days=365)
-            
             return {
                 'total_credits_used': 0.0,
                 'total_credits_billed': 0.0,
-                'period_start': start_date,
-                'period_end': end_date,
-                'compute_pools': []
+                'active_compute_pools': 0
             }
         
         total_used = sum(item['credits_used'] for item in usage_data)
         total_billed = sum(item['credits_billed'] for item in usage_data)
+        active_compute_pools = len(set(item['compute_pool_name'] for item in usage_data))
         
         return {
             'total_credits_used': total_used,
             'total_credits_billed': total_billed,
-            'period_start': start_date,
-            'period_end': end_date,
-            'compute_pools': usage_data
+            'active_compute_pools': active_compute_pools
         }
 
 
@@ -970,6 +961,276 @@ class SnowflakeConnection:
         query = "UPDATE SOLUTION_API_KEYS SET IS_ACTIVE = %s WHERE ID = %s"
         self.execute_non_query(query, (is_active, api_key_id))
 
+    def get_warehouse_credit_usage(self, start_date=None, end_date=None, period_type="monthly", warehouse_names=None):
+        """Get credit usage data for warehouses from Warehouse Metering History"""
+        from datetime import datetime, timedelta
+        
+        # Default to last 12 months if no dates provided
+        if not end_date:
+            end_date = datetime.now()
+        if not start_date:
+            if period_type == "daily":
+                start_date = end_date - timedelta(days=30)
+            elif period_type == "weekly":
+                start_date = end_date - timedelta(weeks=12)
+            else:  # monthly
+                start_date = end_date - timedelta(days=365)
+        
+        # Define the aggregation period
+        date_trunc_format = {
+            "daily": "DAY",
+            "weekly": "WEEK",
+            "monthly": "MONTH"
+        }.get(period_type, "MONTH")
+        
+        # Build WHERE clause for warehouse filtering
+        warehouse_filter = ""
+        if warehouse_names:
+            warehouse_list = "','".join(warehouse_names)
+            warehouse_filter = f"AND WAREHOUSE_NAME IN ('{warehouse_list}')"
+        
+        # Query Warehouse Metering History for credit consumption
+        query = f"""
+        SELECT 
+            WAREHOUSE_NAME,
+            DATE_TRUNC('{date_trunc_format}', START_TIME) AS USAGE_DATE,
+            SUM(CREDITS_USED) AS CREDITS_USED,
+            SUM(CREDITS_USED_COMPUTE) AS CREDITS_USED_COMPUTE,
+            SUM(CREDITS_USED_CLOUD_SERVICES) AS CREDITS_USED_CLOUD_SERVICES
+        FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
+        WHERE START_TIME >= %s 
+            AND START_TIME <= %s
+            AND WAREHOUSE_NAME IS NOT NULL
+            {warehouse_filter}
+        GROUP BY WAREHOUSE_NAME, DATE_TRUNC('{date_trunc_format}', START_TIME)
+        ORDER BY USAGE_DATE DESC, WAREHOUSE_NAME
+        """
+        
+        try:
+            result = self.execute_query(query, (start_date, end_date))
+            
+            warehouse_usage = []
+            for row in result:
+                warehouse_usage.append({
+                    'warehouse_name': row['WAREHOUSE_NAME'],
+                    'date': row['USAGE_DATE'],
+                    'credits_used': float(row['CREDITS_USED']) if row['CREDITS_USED'] else 0.0,
+                    'credits_used_compute': float(row['CREDITS_USED_COMPUTE']) if row['CREDITS_USED_COMPUTE'] else 0.0,
+                    'credits_used_cloud_services': float(row['CREDITS_USED_CLOUD_SERVICES']) if row['CREDITS_USED_CLOUD_SERVICES'] else 0.0,
+                    'period_type': period_type
+                })
+            
+            return warehouse_usage
+            
+        except Exception as e:
+            logger.error(f"Error getting warehouse credit usage: {e}")
+            logger.info("No real warehouse metering data available - returning empty dataset")
+            return []
+
+    def get_warehouse_credit_usage_summary(self, start_date=None, end_date=None, period_type="monthly", warehouse_names=None):
+        """Get summarized warehouse credit usage data"""
+        usage_data = self.get_warehouse_credit_usage(start_date, end_date, period_type, warehouse_names)
+        
+        if not usage_data:
+            return {
+                'total_credits_used': 0.0,
+                'total_credits_compute': 0.0,
+                'total_credits_cloud_services': 0.0,
+                'active_warehouses': 0
+            }
+        
+        total_credits_used = sum(item['credits_used'] for item in usage_data)
+        total_credits_compute = sum(item['credits_used_compute'] for item in usage_data)
+        total_credits_cloud_services = sum(item['credits_used_cloud_services'] for item in usage_data)
+        active_warehouses = len(set(item['warehouse_name'] for item in usage_data))
+        
+        return {
+            'total_credits_used': total_credits_used,
+            'total_credits_compute': total_credits_compute,
+            'total_credits_cloud_services': total_credits_cloud_services,
+            'active_warehouses': active_warehouses
+        }
+
+    def get_storage_usage(self, start_date=None, end_date=None, period_type="monthly"):
+        """Get storage usage data from Snowflake ACCOUNT_USAGE.STORAGE_USAGE"""
+        from datetime import datetime, timedelta
+        
+        # Default to last 12 months if no dates provided
+        if not end_date:
+            end_date = datetime.now()
+        if not start_date:
+            if period_type == "daily":
+                start_date = end_date - timedelta(days=30)
+            elif period_type == "weekly":
+                start_date = end_date - timedelta(weeks=12)
+            else:  # monthly
+                start_date = end_date - timedelta(days=365)
+        
+        # Define the aggregation period
+        date_trunc_format = {
+            "daily": "DAY",
+            "weekly": "WEEK", 
+            "monthly": "MONTH"
+        }.get(period_type, "MONTH")
+        
+        # Query Storage Usage for account-wide storage data
+        query = f"""
+        SELECT 
+            DATE_TRUNC('{date_trunc_format}', USAGE_DATE) AS USAGE_DATE,
+            AVG(STORAGE_BYTES) AS STORAGE_BYTES,
+            AVG(STAGE_BYTES) AS STAGE_BYTES,
+            AVG(FAILSAFE_BYTES) AS FAILSAFE_BYTES,
+            AVG(HYBRID_TABLE_STORAGE_BYTES) AS HYBRID_TABLE_STORAGE_BYTES
+        FROM SNOWFLAKE.ACCOUNT_USAGE.STORAGE_USAGE
+        WHERE USAGE_DATE >= %s 
+            AND USAGE_DATE <= %s
+        GROUP BY DATE_TRUNC('{date_trunc_format}', USAGE_DATE)
+        ORDER BY USAGE_DATE DESC
+        """
+        
+        try:
+            result = self.execute_query(query, (start_date, end_date))
+            
+            storage_usage = []
+            for row in result:
+                usage_info = {
+                    'usage_date': row['USAGE_DATE'],
+                    'storage_bytes': float(row['STORAGE_BYTES'] or 0),
+                    'stage_bytes': float(row['STAGE_BYTES'] or 0),
+                    'failsafe_bytes': float(row['FAILSAFE_BYTES'] or 0),
+                    'hybrid_table_storage_bytes': float(row['HYBRID_TABLE_STORAGE_BYTES'] or 0),
+                    'total_bytes': float((row['STORAGE_BYTES'] or 0) + (row['STAGE_BYTES'] or 0) + (row['FAILSAFE_BYTES'] or 0) + (row['HYBRID_TABLE_STORAGE_BYTES'] or 0)),
+                    'period_type': period_type
+                }
+                storage_usage.append(usage_info)
+            
+            return storage_usage
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch storage usage data: {e}")
+            logger.info("No storage usage data available - returning empty dataset")
+            return []
+
+    def get_database_storage_usage(self, start_date=None, end_date=None, period_type="monthly", database_names=None):
+        """Get database storage usage data from Snowflake ACCOUNT_USAGE.DATABASE_STORAGE_USAGE_HISTORY"""
+        from datetime import datetime, timedelta
+        
+        # Default to last 12 months if no dates provided
+        if not end_date:
+            end_date = datetime.now()
+        if not start_date:
+            if period_type == "daily":
+                start_date = end_date - timedelta(days=30)
+            elif period_type == "weekly":
+                start_date = end_date - timedelta(weeks=12)
+            else:  # monthly
+                start_date = end_date - timedelta(days=365)
+        
+        # Define the aggregation period
+        date_trunc_format = {
+            "daily": "DAY",
+            "weekly": "WEEK",
+            "monthly": "MONTH"
+        }.get(period_type, "MONTH")
+        
+        # Build WHERE clause for database filtering
+        database_filter = ""
+        if database_names:
+            database_list = "','".join(database_names)
+            database_filter = f"AND DATABASE_NAME IN ('{database_list}')"
+        
+        # Query Database Storage Usage History for per-database storage data
+        query = f"""
+        SELECT 
+            DATABASE_NAME,
+            DATE_TRUNC('{date_trunc_format}', USAGE_DATE) AS USAGE_DATE,
+            AVG(AVERAGE_DATABASE_BYTES) AS STORAGE_BYTES,
+            AVG(AVERAGE_FAILSAFE_BYTES) AS FAILSAFE_BYTES,
+            AVG(AVERAGE_HYBRID_TABLE_STORAGE_BYTES) AS HYBRID_TABLE_STORAGE_BYTES
+        FROM SNOWFLAKE.ACCOUNT_USAGE.DATABASE_STORAGE_USAGE_HISTORY
+        WHERE USAGE_DATE >= %s 
+            AND USAGE_DATE <= %s
+            AND DATABASE_NAME IS NOT NULL
+            AND DELETED IS NULL
+            {database_filter}
+        GROUP BY DATABASE_NAME, DATE_TRUNC('{date_trunc_format}', USAGE_DATE)
+        ORDER BY USAGE_DATE DESC, DATABASE_NAME
+        """
+        
+        try:
+            result = self.execute_query(query, (start_date, end_date))
+            
+            database_storage = []
+            for row in result:
+                storage_info = {
+                    'database_name': row['DATABASE_NAME'],
+                    'usage_date': row['USAGE_DATE'],
+                    'storage_bytes': float(row['STORAGE_BYTES'] or 0),
+                    'failsafe_bytes': float(row['FAILSAFE_BYTES'] or 0),
+                    'hybrid_table_storage_bytes': float(row['HYBRID_TABLE_STORAGE_BYTES'] or 0),
+                    'total_bytes': float((row['STORAGE_BYTES'] or 0) + (row['FAILSAFE_BYTES'] or 0) + (row['HYBRID_TABLE_STORAGE_BYTES'] or 0)),
+                    'period_type': period_type
+                }
+                database_storage.append(storage_info)
+            
+            return database_storage
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch database storage usage data: {e}")
+            logger.info("No database storage usage data available - returning empty dataset")
+            return []
+
+    def get_storage_usage_summary(self, start_date=None, end_date=None, period_type="monthly"):
+        """Get summarized storage usage data"""
+        usage_data = self.get_storage_usage(start_date, end_date, period_type)
+        
+        if not usage_data:
+            return {
+                'total_storage_gb': 0.0,
+                'total_stage_gb': 0.0,
+                'total_failsafe_gb': 0.0,
+                'total_hybrid_gb': 0.0,
+                'active_databases': 0,
+                'average_storage_per_day_gb': 0.0
+            }
+        
+        # Convert bytes to GB (1 GB = 1024^3 bytes)
+        bytes_to_gb = 1024 ** 3
+        
+        total_storage_gb = sum(item['storage_bytes'] for item in usage_data) / bytes_to_gb
+        total_stage_gb = sum(item['stage_bytes'] for item in usage_data) / bytes_to_gb
+        total_failsafe_gb = sum(item['failsafe_bytes'] for item in usage_data) / bytes_to_gb
+        total_hybrid_gb = sum(item['hybrid_table_storage_bytes'] for item in usage_data) / bytes_to_gb
+        
+        # Get database count from database storage usage
+        try:
+            db_storage_data = self.get_database_storage_usage(start_date, end_date, period_type)
+            active_databases = len(set(item['database_name'] for item in db_storage_data))
+        except:
+            active_databases = 0
+        
+        # Calculate average storage per day
+        from datetime import datetime
+        if start_date and end_date:
+            if isinstance(start_date, str):
+                start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            if isinstance(end_date, str):
+                end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            
+            days_diff = (end_date - start_date).days + 1
+            average_storage_per_day_gb = total_storage_gb / max(days_diff, 1)
+        else:
+            average_storage_per_day_gb = 0.0
+        
+        return {
+            'total_storage_gb': total_storage_gb,
+            'total_stage_gb': total_stage_gb,
+            'total_failsafe_gb': total_failsafe_gb,
+            'total_hybrid_gb': total_hybrid_gb,
+            'active_databases': active_databases,
+            'average_storage_per_day_gb': average_storage_per_day_gb
+        }
+
 # Global database instance
 _db_instance = None
 
@@ -978,4 +1239,5 @@ def get_database() -> SnowflakeConnection:
     global _db_instance
     if _db_instance is None:
         _db_instance = SnowflakeConnection()
+        _db_instance.connect()
     return _db_instance 

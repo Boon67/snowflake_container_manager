@@ -227,9 +227,34 @@ class CreditUsageFilter(BaseModel):
 class CreditUsageSummary(BaseModel):
     total_credits_used: float
     total_credits_billed: float
-    period_start: datetime
-    period_end: datetime
-    compute_pools: List[CreditUsage]
+    active_compute_pools: int
+
+# Storage Usage Models
+class StorageUsage(BaseModel):
+    usage_date: datetime
+    storage_bytes: float
+    stage_bytes: float
+    failsafe_bytes: float
+    hybrid_table_storage_bytes: float
+    total_bytes: float
+    period_type: str
+
+class DatabaseStorageUsage(BaseModel):
+    database_name: str
+    usage_date: datetime
+    storage_bytes: float
+    failsafe_bytes: float
+    hybrid_table_storage_bytes: float
+    total_bytes: float
+    period_type: str
+
+class StorageUsageSummary(BaseModel):
+    total_storage_gb: float
+    total_stage_gb: float
+    total_failsafe_gb: float
+    total_hybrid_gb: float
+    active_databases: int
+    average_storage_per_day_gb: float
 
 # --- Solution API Key Models ---
 class SolutionAPIKey(BaseModel):
