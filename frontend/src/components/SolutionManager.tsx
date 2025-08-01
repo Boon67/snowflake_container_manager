@@ -18,8 +18,10 @@ import {
   Select,
   Dropdown,
   Menu,
+  Card,
+  Switch,
+  Spin,
 } from 'antd';
-import { Card } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,
@@ -34,6 +36,8 @@ import {
   CopyOutlined,
   StopOutlined,
   PlayCircleOutlined,
+  TagsOutlined,
+  SolutionOutlined,
 } from '@ant-design/icons';
 import { 
   api, 
@@ -41,17 +45,21 @@ import {
   CreateSolution, 
   UpdateSolution, 
   Parameter, 
-  CreateParameter, 
+  CreateParameter,
+  UpdateParameter,
   Tag,
+  CreateTag,
   SolutionAPIKeyList,
   CreateSolutionAPIKey,
   SolutionAPIKeyResponse
 } from '../services/api.ts';
+import { useTheme } from '../contexts/ThemeContext.tsx';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { TabPane } = Tabs;
 const { Item: MenuItem } = Menu;
+const { Option } = Select;
 
 interface TransferItem {
   key: string;
@@ -66,9 +74,12 @@ interface SolutionManagerProps {
 }
 
 const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, onNavigateToSolution }) => {
+  const { isDarkMode } = useTheme();
+  
+  // Solutions state
   const [solutions, setSolutions] = useState<Solution[]>([]);
   const [filteredSolutions, setFilteredSolutions] = useState<Solution[]>([]);
-  const [searchText, setSearchText] = useState('');
+  const [solutionSearchText, setSolutionSearchText] = useState('');
   const [allParameters, setAllParameters] = useState<Parameter[]>([]);
   const [selectedSolutionParams, setSelectedSolutionParams] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,6 +93,26 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   
+  // Parameters state
+  const [parameters, setParameters] = useState<Parameter[]>([]);
+  const [filteredParameters, setFilteredParameters] = useState<Parameter[]>([]);
+  const [parameterSearchText, setParameterSearchText] = useState('');
+  const [parameterModalVisibleStandalone, setParameterModalVisibleStandalone] = useState(false);
+  const [editingParameter, setEditingParameter] = useState<Parameter | null>(null);
+  const [parameterFormStandalone] = Form.useForm();
+  const [parameterDeleteLoading, setParameterDeleteLoading] = useState<string | null>(null);
+  
+  // Tags state
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [filteredTags, setFilteredTags] = useState<Tag[]>([]);
+  const [tagSearchText, setTagSearchText] = useState('');
+  const [tagModalVisible, setTagModalVisible] = useState(false);
+  const [tagForm] = Form.useForm();
+  const [tagDeleteLoading, setTagDeleteLoading] = useState<string | null>(null);
+  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
+  const [tagParameters, setTagParameters] = useState<Record<string, Parameter[]>>({});
+  const [loadingParameters, setLoadingParameters] = useState<Record<string, boolean>>({});
+  
   // API Key management state
   const [apiKeys, setApiKeys] = useState<SolutionAPIKeyList[]>([]);
   const [apiKeyModalVisible, setApiKeyModalVisible] = useState(false);
@@ -92,6 +123,8 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     loadSolutions();
     loadAllParameters();
     loadAllTags();
+    loadParameters();
+    loadTags();
   }, []);
 
   // Handle navigation to specific solution
@@ -125,9 +158,29 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     }
   };
 
+  const loadParameters = async () => {
+    try {
+      const response = await api.searchParameters({});
+      setParameters(response.data);
+      setFilteredParameters(response.data);
+    } catch (error) {
+      message.error('Failed to load parameters');
+    }
+  };
+
+  const loadTags = async () => {
+    try {
+      const response = await api.getTags();
+      setTags(response.data);
+      setFilteredTags(response.data);
+    } catch (error) {
+      message.error('Failed to load tags');
+    }
+  };
+
   // Filter solutions based on search text
-  const handleSearch = (value: string) => {
-    setSearchText(value);
+  const handleSolutionSearch = (value: string) => {
+    setSolutionSearchText(value);
     if (!value.trim()) {
       setFilteredSolutions(solutions);
       return;
@@ -144,6 +197,44 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     });
     
     setFilteredSolutions(filtered);
+  };
+
+  // Filter parameters based on search text
+  const handleParameterSearch = (value: string) => {
+    setParameterSearchText(value);
+    if (!value.trim()) {
+      setFilteredParameters(parameters);
+      return;
+    }
+
+    const filtered = parameters.filter(param => {
+      const searchLower = value.toLowerCase();
+      const nameMatch = param.name?.toLowerCase().includes(searchLower);
+      const keyMatch = param.key.toLowerCase().includes(searchLower);
+      const valueMatch = param.value?.toLowerCase().includes(searchLower);
+      const descMatch = param.description?.toLowerCase().includes(searchLower);
+      const tagMatch = param.tags.some(tag => tag.name.toLowerCase().includes(searchLower));
+      
+      return nameMatch || keyMatch || valueMatch || descMatch || tagMatch;
+    });
+    
+    setFilteredParameters(filtered);
+  };
+
+  // Filter tags based on search text
+  const handleTagSearch = (value: string) => {
+    setTagSearchText(value);
+    if (!value.trim()) {
+      setFilteredTags(tags);
+      return;
+    }
+
+    const filtered = tags.filter(tag => {
+      const searchLower = value.toLowerCase();
+      return tag.name.toLowerCase().includes(searchLower);
+    });
+    
+    setFilteredTags(filtered);
   };
 
   const loadAllParameters = async () => {
@@ -506,53 +597,492 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     },
   ];
 
+  const parameterColumns = [
+    {
+      title: 'Name',
+      dataIndex: 'name',
+      key: 'name',
+      sorter: (a: Parameter, b: Parameter) => (a.name || '').localeCompare(b.name || ''),
+      render: (text: string, record: Parameter) => (
+        <Text strong style={{ display: 'flex', alignItems: 'center' }}>
+          {record.is_secret ? <LockOutlined style={{ marginRight: 4, color: '#faad14' }} /> : <KeyOutlined style={{ marginRight: 4 }} />}
+          {text || <Text type="secondary">No name</Text>}
+        </Text>
+      ),
+    },
+    {
+      title: 'Key',
+      dataIndex: 'key',
+      key: 'key',
+      sorter: (a: Parameter, b: Parameter) => a.key.localeCompare(b.key),
+      render: (text: string) => <Text code>{text}</Text>,
+    },
+    {
+      title: 'Value',
+      dataIndex: 'value',
+      key: 'value',
+      sorter: (a: Parameter, b: Parameter) => {
+        const aValue = a.value || '';
+        const bValue = b.value || '';
+        return aValue.localeCompare(bValue);
+      },
+      render: (text: string, record: Parameter) => (
+        record.is_secret ? '••••••••' : <Text code>{text || <Text type="secondary">null</Text>}</Text>
+      ),
+    },
+    {
+      title: 'Tags',
+      dataIndex: 'tags',
+      key: 'tags',
+      render: (tags: Tag[]) => (
+        <Space wrap>
+          {tags.map(tag => (
+            <AntTag key={tag.id} color="blue" style={{ margin: '2px' }}>
+              {tag.name}
+            </AntTag>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (text: string) => text || <Text type="secondary">No description</Text>,
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 120,
+      render: (_, record: Parameter) => (
+        <Space>
+          <Tooltip title="Edit">
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => handleEditParameter(record)}
+            />
+          </Tooltip>
+          <Popconfirm
+            title="Delete Parameter"
+            description="Are you sure you want to delete this parameter?"
+            onConfirm={() => handleDeleteParameter(record.id)}
+            okText="Yes"
+            cancelText="No"
+          >
+            <Tooltip title="Delete">
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                loading={parameterDeleteLoading === record.id}
+              />
+            </Tooltip>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  const tagColumns = [
+    {
+      title: 'Tag Name',
+      dataIndex: 'name',
+      key: 'name',
+      sorter: (a: Tag, b: Tag) => a.name.localeCompare(b.name),
+      render: (text: string) => (
+        <Space>
+          <TagsOutlined style={{ color: '#1F86C9' }} />
+          <Text strong>{text}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Parameters',
+      key: 'parameters',
+      width: 120,
+      render: (_, record: Tag) => {
+        const parameters = tagParameters[record.id];
+        const isLoading = loadingParameters[record.id];
+        
+        if (isLoading) {
+          return <Spin size="small" />;
+        }
+        
+        if (parameters) {
+          return (
+            <Badge 
+              count={parameters.length} 
+              style={{ backgroundColor: parameters.length > 0 ? '#52c41a' : '#d9d9d9' }}
+            />
+          );
+        }
+        
+        return (
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            Click to view
+          </Text>
+        );
+      },
+    },
+    {
+      title: 'Created',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 150,
+      sorter: (a: Tag, b: Tag) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      render: (date: string) => new Date(date).toLocaleDateString(),
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      width: 120,
+      render: (_, record: Tag) => (
+        <Space>
+          <Popconfirm
+            title="Delete Tag"
+            description="Are you sure you want to delete this tag? This will check if it's in use first."
+            onConfirm={() => handleDeleteTag(record.id)}
+            okText="Yes"
+            cancelText="No"
+          >
+            <Tooltip title="Delete">
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                loading={tagDeleteLoading === record.id}
+              />
+            </Tooltip>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  const handleTagExpand = (expanded: boolean, record: Tag) => {
+    if (expanded) {
+      setExpandedRowKeys(prev => [...prev, record.id]);
+    } else {
+      setExpandedRowKeys(prev => prev.filter(key => key !== record.id));
+    }
+  };
+
+  const renderTagExpandedRow = (record: Tag) => (
+    <div style={{ margin: '16px 0' }}>
+      <Title level={5} style={{ marginBottom: 12 }}>
+        <KeyOutlined style={{ marginRight: 8, color: '#1F86C9' }} />
+        Parameters for Tag: {record.name}
+      </Title>
+      <Table
+        dataSource={tagParameters[record.id] || []}
+        loading={loadingParameters[record.id]}
+        rowKey="id"
+        pagination={false}
+        columns={parameterColumns}
+      />
+    </div>
+  );
+
+  const handleDeleteParameter = async (parameterId: string) => {
+    setParameterDeleteLoading(parameterId);
+    try {
+      await api.deleteParameter(parameterId);
+      message.success('Parameter deleted successfully');
+      loadParameters();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to delete parameter');
+    } finally {
+      setParameterDeleteLoading(null);
+    }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    setTagDeleteLoading(tagId);
+    try {
+      await api.deleteTag(tagId);
+      message.success('Tag deleted successfully');
+      loadTags();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to delete tag');
+    } finally {
+      setTagDeleteLoading(null);
+    }
+  };
+
+  const handleEditTag = async (values: any) => {
+    if (!editingTag) return;
+
+    try {
+      await api.updateTag(editingTag.id, values);
+      message.success('Tag updated successfully');
+      loadTags();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to update tag');
+    } finally {
+      setTagModalVisible(false);
+      setEditingTag(null);
+    }
+  };
+
+  const [editingTag, setEditingTag] = useState<Tag | null>(null);
+
+  const handleEditParameter = (parameter: Parameter) => {
+    setEditingParameter(parameter);
+    parameterFormStandalone.setFieldsValue({
+      name: parameter.name,
+      key: parameter.key,
+      value: parameter.value,
+      description: parameter.description,
+      is_secret: parameter.is_secret,
+      tags: parameter.tags.map(tag => tag.name),
+    });
+    setParameterModalVisibleStandalone(true);
+  };
+
+  const handleSaveParameterStandalone = async (values: any) => {
+    try {
+      const parameterData = {
+        ...values,
+        tags: values.tags || [],
+      };
+
+      if (editingParameter) {
+        await api.updateParameter(editingParameter.id, parameterData);
+        message.success('Parameter updated successfully');
+      } else {
+        await api.createParameter(parameterData as CreateParameter);
+        message.success('Parameter created successfully');
+      }
+      setParameterModalVisibleStandalone(false);
+      setEditingParameter(null);
+      parameterFormStandalone.resetFields();
+      loadParameters();
+      loadAllParameters(); // Refresh the all parameters list too
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to save parameter');
+    }
+  };
+
+  const loadParametersForTag = async (tagId: string, tagName: string) => {
+    if (tagParameters[tagId]) {
+      return; // Already loaded
+    }
+
+    setLoadingParameters(prev => ({ ...prev, [tagId]: true }));
+    try {
+      const response = await api.searchParameters({ tags: [tagName] });
+      setTagParameters(prev => ({ ...prev, [tagId]: response.data }));
+    } catch (error) {
+      message.error('Failed to load parameters for this tag');
+    } finally {
+      setLoadingParameters(prev => ({ ...prev, [tagId]: false }));
+    }
+  };
+
   return (
     <div>
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <Title level={3} style={{ margin: 0 }}>Solutions Management</Title>
-          <Space>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={loadSolutions}
-              loading={loading}
-            >
-              Refresh
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleCreate}
-            >
-              Create Solution
-            </Button>
-          </Space>
-        </div>
+      <Title level={2} style={{ marginBottom: 24 }}>
+        <SolutionOutlined style={{ marginRight: 8, color: '#1F86C9' }} />
+        Solutions Management
+      </Title>
+      
+      <Tabs
+        defaultActiveKey="solutions"
+        items={[
+          {
+            key: 'solutions',
+            label: (
+              <span>
+                <SolutionOutlined />
+                Solutions
+              </span>
+            ),
+            children: (
+              <div>
+                <Card>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Title level={3} style={{ margin: 0 }}>Solutions Management</Title>
+                    <Space>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={loadSolutions}
+                        loading={loading}
+                      >
+                        Refresh
+                      </Button>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={handleCreate}
+                      >
+                        Create Solution
+                      </Button>
+                    </Space>
+                  </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <Input
-            placeholder="Search solutions by name, description, owner, or email..."
-            prefix={<SearchOutlined />}
-            value={searchText}
-            onChange={(e) => handleSearch(e.target.value)}
-            allowClear
-            style={{ maxWidth: 400 }}
-          />
-        </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <Input
+                      placeholder="Search solutions by name, description, owner, or email..."
+                      prefix={<SearchOutlined />}
+                      value={solutionSearchText}
+                      onChange={(e) => handleSolutionSearch(e.target.value)}
+                      allowClear
+                      style={{ maxWidth: 400 }}
+                    />
+                  </div>
 
-        <Table
-          columns={columns}
-          dataSource={filteredSolutions}
-          loading={loading}
-          rowKey="id"
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} solutions`,
-          }}
-        />
-      </Card>
+                  <Table
+                    columns={columns}
+                    dataSource={filteredSolutions}
+                    loading={loading}
+                    rowKey="id"
+                    pagination={{
+                      pageSize: 10,
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} solutions`,
+                    }}
+                  />
+                </Card>
+              </div>
+            ),
+          },
+          {
+            key: 'parameters',
+            label: (
+              <span>
+                <KeyOutlined />
+                Parameters
+              </span>
+            ),
+            children: (
+              <div>
+                <Card>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Title level={3} style={{ margin: 0 }}>Parameters Management</Title>
+                    <Space>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={loadParameters}
+                        loading={loading}
+                      >
+                        Refresh
+                      </Button>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => setParameterModalVisibleStandalone(true)}
+                      >
+                        Create Parameter
+                      </Button>
+                    </Space>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <Input
+                      placeholder="Search parameters by name, key, value, description, or tags..."
+                      prefix={<SearchOutlined />}
+                      value={parameterSearchText}
+                      onChange={(e) => handleParameterSearch(e.target.value)}
+                      allowClear
+                      style={{ maxWidth: 400 }}
+                    />
+                  </div>
+
+                  <Table
+                    columns={parameterColumns}
+                    dataSource={filteredParameters}
+                    loading={loading}
+                    rowKey="id"
+                    pagination={{
+                      pageSize: 10,
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} parameters`,
+                    }}
+                  />
+                </Card>
+              </div>
+            ),
+          },
+          {
+            key: 'tags',
+            label: (
+              <span>
+                <TagsOutlined />
+                Tags
+              </span>
+            ),
+            children: (
+              <div>
+                <Card>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Title level={3} style={{ margin: 0 }}>Tags Management</Title>
+                    <Space>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={loadTags}
+                        loading={loading}
+                      >
+                        Refresh
+                      </Button>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => setTagModalVisible(true)}
+                      >
+                        Create Tag
+                      </Button>
+                    </Space>
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <Input
+                      placeholder="Search tags by name..."
+                      prefix={<SearchOutlined />}
+                      value={tagSearchText}
+                      onChange={(e) => handleTagSearch(e.target.value)}
+                      allowClear
+                      style={{ maxWidth: 300 }}
+                    />
+                  </div>
+
+                  <Table
+                    columns={tagColumns}
+                    dataSource={filteredTags}
+                    loading={loading}
+                    rowKey="id"
+                    expandable={{
+                      expandedRowKeys,
+                      onExpand: handleTagExpand,
+                      expandedRowRender: renderTagExpandedRow,
+                      expandRowByClick: true,
+                      expandIcon: ({ expanded, onExpand, record }) => 
+                        expanded ? (
+                          <Button type="text" size="small" onClick={e => onExpand(record, e)}>
+                            Hide Parameters
+                          </Button>
+                        ) : (
+                          <Button type="text" size="small" onClick={e => onExpand(record, e)}>
+                            Show Parameters
+                          </Button>
+                        )
+                    }}
+                    pagination={{
+                      pageSize: 15,
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} tags`,
+                    }}
+                  />
+                </Card>
+              </div>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title={editingSolution ? 'Edit Solution' : 'Create Solution'}

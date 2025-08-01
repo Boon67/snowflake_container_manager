@@ -8,8 +8,6 @@ import {
   MenuUnfoldOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
-  SettingOutlined,
-  TagsOutlined,
   SunOutlined,
   MoonOutlined,
   BarChartOutlined,
@@ -18,8 +16,6 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import Overview from './Overview.tsx';
 import SolutionManager from './SolutionManager.tsx';
-import ParameterManager from './ParameterManager.tsx';
-import TagManager from './TagManager.tsx';
 import ContainerServiceManager from './ContainerServiceManager.tsx';
 import UserManager from './UserManager.tsx';
 import Analytics from './Analytics.tsx';
@@ -78,36 +74,6 @@ const Dashboard: React.FC = () => {
       children: <SolutionManager selectedSolutionId={selectedSolutionId} onNavigateToSolution={handleNavigateToSolution} />,
     },
     {
-      key: 'parameters',
-      label: (
-        <span>
-          <SettingOutlined />
-          Parameters
-        </span>
-      ),
-      children: <ParameterManager />,
-    },
-    {
-      key: 'tags',
-      label: (
-        <span>
-          <TagsOutlined />
-          Tags
-        </span>
-      ),
-      children: <TagManager />,
-    },
-    ...(user?.role === 'admin' ? [{
-      key: 'users',
-      label: (
-        <span>
-          <UserOutlined />
-          Users
-        </span>
-      ),
-      children: <UserManager />,
-    }] : []),
-    {
       key: 'analytics',
       label: (
         <span>
@@ -127,6 +93,16 @@ const Dashboard: React.FC = () => {
       ),
       children: <ContainerServiceManager />,
     },
+    ...(user?.role === 'admin' ? [{
+      key: 'users',
+      label: (
+        <span>
+          <UserOutlined />
+          Users
+        </span>
+      ),
+      children: <UserManager />,
+    }] : []),
   ];
 
   return (

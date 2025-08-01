@@ -163,6 +163,106 @@ export interface StorageUsageSummary {
   average_storage_per_day_gb: number;
 }
 
+// Repository and Image Interfaces
+export interface ImageRepository {
+  name: string;
+  database: string;
+  schema: string;
+  repository_url: string;
+  created_at: string;
+  updated_at?: string;
+  owner: string;
+  comment?: string;
+}
+
+export interface Database {
+  name: string;
+  created_on: string;
+  comment: string;
+  owner: string;
+  retention_time: number;
+}
+
+export interface Schema {
+  name: string;
+  database_name: string;
+  created_on: string;
+  comment: string;
+  owner: string;
+}
+
+// Network Rules and Policies
+export interface NetworkRule {
+  name: string;
+  created_on: string;
+  database_name?: string;
+  schema_name?: string;
+  owner?: string;
+  comment?: string;
+  type: string;
+  mode: string;
+  entries_in_valuelist: number;
+  owner_role_type?: string;
+}
+
+export interface NetworkRuleCreate {
+  name: string;
+  type: string; // IPV4, AWSVPCEID, AZURELINKID, HOST_PORT, PRIVATE_HOST_PORT
+  mode: string; // INGRESS, INTERNAL_STAGE, EGRESS
+  value_list: string[];
+  comment?: string;
+}
+
+export interface NetworkRuleUpdate {
+  value_list: string[];
+  comment?: string;
+}
+
+export interface NetworkPolicy {
+  name: string;
+  created_on: string;
+  database_name?: string;
+  schema_name?: string;
+  comment?: string;
+  entries_in_allowed_ip_list: number;
+  entries_in_blocked_ip_list: number;
+  entries_in_allowed_network_rules: number;
+  entries_in_blocked_network_rules: number;
+}
+
+export interface NetworkPolicyCreate {
+  name: string;
+  allowed_network_rules?: string[];
+  blocked_network_rules?: string[];
+  allowed_ip_list?: string[];
+  blocked_ip_list?: string[];
+  comment?: string;
+}
+
+export interface NetworkPolicyUpdate {
+  allowed_network_rules?: string[];
+  blocked_network_rules?: string[];
+  allowed_ip_list?: string[];
+  blocked_ip_list?: string[];
+  comment?: string;
+}
+
+export interface ContainerImage {
+  repository_name: string;
+  image_name: string;
+  tag: string;
+  digest: string;
+  size_bytes: number;
+  created_at: string;
+  uploaded_at: string;
+  architecture: string;
+  os: string;
+  media_type: string;
+  repository_database?: string;
+  repository_schema?: string;
+  repository_url?: string;
+}
+
 // Solution API Key Interfaces
 export interface SolutionAPIKey {
   id: string;
@@ -252,7 +352,7 @@ class ApiService {
   constructor() {
     this.axiosInstance = axios.create({
       baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api',
-      timeout: 30000, // Increased to 30 seconds for storage queries
+      timeout: 60000, // Increased to 30 seconds for storage queries
       headers: {
         'Content-Type': 'application/json',
       },
@@ -427,9 +527,124 @@ class ApiService {
     return this.post(`/container-services/${serviceName}/stop`, {});
   }
 
+  async createContainerService(serviceData: {
+    name: string;
+    compute_pool: string;
+    spec: string;
+    min_instances?: number;
+    max_instances?: number;
+  }): Promise<AxiosResponse<ApiResponse>> {
+    return this.post('/container-services', serviceData);
+  }
+
+  async deleteContainerService(serviceName: string): Promise<AxiosResponse<ApiResponse>> {
+    return this.delete(`/container-services/${serviceName}`);
+  }
+
   // Compute Pools
   async getComputePools(): Promise<AxiosResponse<ComputePool[]>> {
     return this.get('/compute-pools');
+  }
+
+  // Image Repositories and Images
+  async getImageRepositories(): Promise<AxiosResponse<ImageRepository[]>> {
+    return this.get('/image-repositories');
+  }
+
+  async getRepositoryImages(repositoryName: string, databaseName?: string, schemaName?: string): Promise<AxiosResponse<ContainerImage[]>> {
+    const params = new URLSearchParams();
+    if (databaseName) params.append('database_name', databaseName);
+    if (schemaName) params.append('schema_name', schemaName);
+    
+    const queryString = params.toString();
+    const url = `/image-repositories/${repositoryName}/images${queryString ? `?${queryString}` : ''}`;
+    return this.get(url);
+  }
+
+  async getAllImages(): Promise<AxiosResponse<ContainerImage[]>> {
+    return this.get('/images');
+  }
+
+  async createComputePool(poolData: {
+    name: string;
+    instance_family: string;
+    min_nodes: number;
+    max_nodes: number;
+    auto_resume: boolean;
+    auto_suspend_secs: number;
+  }): Promise<AxiosResponse<ApiResponse>> {
+    return this.post('/compute-pools', poolData);
+  }
+
+  async deleteComputePool(poolName: string): Promise<AxiosResponse<ApiResponse>> {
+    return this.delete(`/compute-pools/${poolName}`);
+  }
+
+  async createImageRepository(repoData: {
+    name: string;
+    database?: string;
+    schema?: string;
+  }): Promise<AxiosResponse<ApiResponse>> {
+    return this.post('/image-repositories', repoData);
+  }
+
+  async deleteImageRepository(repositoryName: string, databaseName?: string, schemaName?: string): Promise<AxiosResponse<ApiResponse>> {
+    const params = new URLSearchParams();
+    if (databaseName) params.append('database_name', databaseName);
+    if (schemaName) params.append('schema_name', schemaName);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    return this.delete(`/image-repositories/${repositoryName}${queryString}`);
+  }
+
+  // Databases and Schemas
+  async getDatabases(): Promise<AxiosResponse<{success: boolean, data: Database[]}>> {
+    return this.get('/databases');
+  }
+
+  async getSchemas(databaseName: string): Promise<AxiosResponse<{success: boolean, data: Schema[]}>> {
+    return this.get(`/databases/${databaseName}/schemas`);
+  }
+
+  // Network Rules
+  async getNetworkRules(): Promise<AxiosResponse<{success: boolean, data: NetworkRule[]}>> {
+    return this.get('/network-rules');
+  }
+
+  async createNetworkRule(ruleData: NetworkRuleCreate): Promise<AxiosResponse<{message: string}>> {
+    return this.post('/network-rules', ruleData);
+  }
+
+  async updateNetworkRule(ruleName: string, ruleData: NetworkRuleUpdate): Promise<AxiosResponse<{message: string}>> {
+    return this.put(`/network-rules/${ruleName}`, ruleData);
+  }
+
+  async deleteNetworkRule(ruleName: string): Promise<AxiosResponse<{message: string}>> {
+    return this.delete(`/network-rules/${ruleName}`);
+  }
+
+  async describeNetworkRule(ruleName: string): Promise<AxiosResponse<{success: boolean, data: any}>> {
+    return this.get(`/network-rules/${ruleName}`);
+  }
+
+  // Network Policies
+  async getNetworkPolicies(): Promise<AxiosResponse<{success: boolean, data: NetworkPolicy[]}>> {
+    return this.get('/network-policies');
+  }
+
+  async createNetworkPolicy(policyData: NetworkPolicyCreate): Promise<AxiosResponse<{message: string}>> {
+    return this.post('/network-policies', policyData);
+  }
+
+  async updateNetworkPolicy(policyName: string, policyData: NetworkPolicyUpdate): Promise<AxiosResponse<{message: string}>> {
+    return this.put(`/network-policies/${policyName}`, policyData);
+  }
+
+  async deleteNetworkPolicy(policyName: string): Promise<AxiosResponse<{message: string}>> {
+    return this.delete(`/network-policies/${policyName}`);
+  }
+
+  async describeNetworkPolicy(policyName: string): Promise<AxiosResponse<{success: boolean, data: any}>> {
+    return this.get(`/network-policies/${policyName}`);
   }
 
   // Analytics

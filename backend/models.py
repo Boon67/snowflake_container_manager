@@ -199,16 +199,93 @@ class ContainerServiceOperation(BaseModel):
     operation: str = Field(..., description="Operation type: 'start', 'stop', 'suspend', 'resume'")
 
 # --- Compute Pool Models ---
+class ComputePoolCreate(BaseModel):
+    name: str = Field(..., description="Compute pool name", max_length=255)
+    instance_family: str = Field(..., description="Instance family (e.g., CPU_X64_XS, CPU_X64_S)")
+    min_nodes: int = Field(1, description="Minimum number of nodes", ge=1, le=100)
+    max_nodes: int = Field(1, description="Maximum number of nodes", ge=1, le=100)
+    auto_resume: bool = Field(True, description="Auto-resume when SQL is submitted")
+    auto_suspend_secs: int = Field(600, description="Auto-suspend timeout in seconds", ge=0)
+
 class ComputePool(BaseModel):
     name: str
     state: str
     min_nodes: int
     max_nodes: int
     instance_family: str
-    created_at: datetime
+    created_at: str
     
     class Config:
         from_attributes = True
+
+# --- Image Repository Models ---
+class ImageRepositoryCreate(BaseModel):
+    name: str = Field(..., description="Repository name", max_length=255)
+    database: Optional[str] = Field(None, description="Database name")
+    schema: Optional[str] = Field(None, description="Schema name")
+
+class ImageRepository(BaseModel):
+    name: str
+    database: str
+    schema: str
+    repository_url: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+    owner: Optional[str] = None
+    comment: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+# Network Rules and Policies Models
+class NetworkRule(BaseModel):
+    name: str
+    created_on: str
+    database_name: str = None
+    schema_name: str = None
+    owner: str = None
+    comment: str = None
+    type: str
+    mode: str
+    entries_in_valuelist: int = 0
+    owner_role_type: str = None
+
+class NetworkRuleCreate(BaseModel):
+    name: str
+    type: str  # IPV4, AWSVPCEID, AZURELINKID, HOST_PORT, PRIVATE_HOST_PORT
+    mode: str  # INGRESS, INTERNAL_STAGE, EGRESS
+    value_list: List[str]
+    comment: str = None
+
+class NetworkRuleUpdate(BaseModel):
+    value_list: List[str]
+    comment: str = None
+
+class NetworkPolicy(BaseModel):
+    name: str
+    created_on: str
+    comment: str = None
+    entries_in_allowed_ip_list: int = 0
+    entries_in_blocked_ip_list: int = 0
+    entries_in_allowed_network_rules: int = 0
+    entries_in_blocked_network_rules: int = 0
+
+class NetworkPolicyCreate(BaseModel):
+    name: str
+    allowed_network_rules: List[str] = None
+    blocked_network_rules: List[str] = None
+    allowed_ip_list: List[str] = None
+    blocked_ip_list: List[str] = None
+    comment: str = None
+
+class NetworkPolicyUpdate(BaseModel):
+    allowed_network_rules: List[str] = None
+    blocked_network_rules: List[str] = None
+    allowed_ip_list: List[str] = None
+    blocked_ip_list: List[str] = None
+    comment: str = None
+
+# Note: ComputePool models are defined above with create/read models
 
 # --- Analytics Models ---
 class CreditUsage(BaseModel):

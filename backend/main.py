@@ -1521,6 +1521,80 @@ async def stop_container_service(
     
     return models.APIResponse(message=f"Container service {service_name} stopped successfully")
 
+@app.post("/api/container-services")
+async def create_container_service(
+    service_data: models.ContainerServiceCreate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new container service on a compute pool"""
+    db = get_database()
+    try:
+        # Validate service name upfront
+        if '-' in service_data.name:
+            logger.warning(f"Service name '{service_data.name}' contains hyphens, will be replaced with underscores")
+        
+        success = db.create_container_service(
+            service_data.name,
+            service_data.compute_pool,
+            service_data.spec or "",
+            service_data.min_instances or 1,
+            service_data.max_instances or 1
+        )
+        if not success:
+            # The database method already logged the specific error
+            # Check if it's a validation/client error vs server error
+            raise Exception("Container service creation failed")
+        
+        # Use the sanitized name in the response
+        final_name = service_data.name.replace('-', '_') if '-' in service_data.name else service_data.name
+        return models.APIResponse(message=f"Container service {final_name} created successfully")
+    except ValueError as ve:
+        # Handle validation errors with 400 Bad Request
+        logger.error(f"Validation error creating container service: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        error_msg = str(e)
+        if "Image repository" in error_msg and "does not exist" in error_msg:
+            raise HTTPException(
+                status_code=400, 
+                detail="Image repository not found. Please ensure the image path in your specification is correct and the repository exists."
+            )
+        elif "Compute pool" in error_msg and "does not exist" in error_msg:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Compute pool '{service_data.compute_pool}' not found or not accessible."
+            )
+        elif "syntax error" in error_msg.lower():
+            raise HTTPException(
+                status_code=400, 
+                detail="Syntax error in service specification. Please check your YAML specification format."
+            )
+        elif "not authorized" in error_msg.lower() or "does not exist" in error_msg.lower():
+            raise HTTPException(
+                status_code=400, 
+                detail="Resource not found or access denied. Please check your permissions and ensure all referenced resources exist."
+            )
+        else:
+            logger.error(f"Error creating container service: {e}")
+            raise HTTPException(status_code=500, detail=f"Internal server error while creating container service")
+
+@app.delete("/api/container-services/{service_name}")
+async def delete_container_service(
+    service_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete a container service"""
+    db = get_database()
+    try:
+        success = db.drop_container_service(service_name)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to delete container service {service_name}")
+        
+        return models.APIResponse(message=f"Container service {service_name} deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting container service: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete container service: {str(e)}")
+
 @app.get("/api/compute-pools", response_model=List[models.ComputePool])
 async def get_compute_pools(current_user: models.User = Depends(auth.get_current_active_user)):
     """Get all compute pools"""
@@ -1571,6 +1645,47 @@ async def resume_compute_pool(
     else:
         raise HTTPException(status_code=500, detail=f"Failed to resume compute pool {pool_name}")
 
+@app.post("/api/compute-pools")
+async def create_compute_pool(
+    pool_data: models.ComputePoolCreate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new compute pool"""
+    db = get_database()
+    try:
+        success = db.create_compute_pool(
+            pool_data.name,
+            pool_data.instance_family,
+            pool_data.min_nodes,
+            pool_data.max_nodes,
+            pool_data.auto_resume,
+            pool_data.auto_suspend_secs
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to create compute pool {pool_data.name}")
+        
+        return models.APIResponse(message=f"Compute pool {pool_data.name} created successfully")
+    except Exception as e:
+        logger.error(f"Error creating compute pool: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create compute pool: {str(e)}")
+
+@app.delete("/api/compute-pools/{pool_name}")
+async def delete_compute_pool(
+    pool_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete a compute pool"""
+    db = get_database()
+    try:
+        success = db.drop_compute_pool(pool_name)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to delete compute pool {pool_name}")
+        
+        return models.APIResponse(message=f"Compute pool {pool_name} deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting compute pool: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete compute pool: {str(e)}")
+
 @app.get("/api/compute-pools/{pool_name}/logs")
 async def get_compute_pool_logs(
     pool_name: str,
@@ -1586,6 +1701,326 @@ async def get_compute_pool_logs(
         "logs": logs,
         "total_count": len(logs)
     }
+
+# --- Repository and Image Endpoints ---
+@app.get("/api/image-repositories")
+async def get_image_repositories(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all image repositories"""
+    db = get_database()
+    try:
+        repositories = db.get_image_repositories()
+        return repositories
+    except Exception as e:
+        logger.error(f"Error getting image repositories: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve image repositories")
+
+@app.get("/api/image-repositories/{repository_name}/images")
+async def get_repository_images(
+    repository_name: str,
+    database_name: str = None,
+    schema_name: str = None,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all images in a specific repository"""
+    db = get_database()
+    try:
+        images = db.get_repository_images(repository_name, database_name, schema_name)
+        return images
+    except Exception as e:
+        logger.error(f"Error getting images for repository {repository_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve images for repository {repository_name}")
+
+@app.get("/api/images")
+async def get_all_images(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all images across all repositories"""
+    db = get_database()
+    try:
+        images = db.get_all_images()
+        return images
+    except Exception as e:
+        logger.error(f"Error getting all images: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve images")
+
+@app.post("/api/image-repositories")
+async def create_image_repository(
+    repo_data: models.ImageRepositoryCreate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new image repository"""
+    db = get_database()
+    try:
+        success = db.create_image_repository(
+            repo_data.name,
+            repo_data.database,
+            repo_data.schema
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to create image repository {repo_data.name}")
+        
+        return models.APIResponse(message=f"Image repository {repo_data.name} created successfully")
+    except Exception as e:
+        logger.error(f"Error creating image repository: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create image repository: {str(e)}")
+
+@app.delete("/api/image-repositories/{repository_name}")
+async def delete_image_repository(
+    repository_name: str,
+    database_name: str = None,
+    schema_name: str = None,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete an image repository"""
+    db = get_database()
+    try:
+        success = db.drop_image_repository(repository_name, database_name, schema_name)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to delete image repository {repository_name}")
+        
+        return models.APIResponse(message=f"Image repository {repository_name} deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting image repository: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete image repository: {str(e)}")
+
+@app.get("/api/databases")
+async def get_databases(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all available databases"""
+    db = get_database()
+    try:
+        databases = db.get_databases()
+        return {"success": True, "data": databases}
+    except Exception as e:
+        logger.error(f"Error getting databases: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve databases")
+
+@app.get("/api/databases/{database_name}/schemas")
+async def get_schemas(
+    database_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all schemas for a specific database"""
+    db = get_database()
+    try:
+        schemas = db.get_schemas(database_name)
+        return {"success": True, "data": schemas}
+    except Exception as e:
+        logger.error(f"Error getting schemas for database {database_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve schemas for database {database_name}")
+
+# Network Rules Endpoints
+@app.get("/api/network-rules")
+async def get_network_rules(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all network rules"""
+    db = get_database()
+    try:
+        rules = db.get_network_rules()
+        return {"success": True, "data": rules}
+    except Exception as e:
+        logger.error(f"Error getting network rules: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve network rules")
+
+@app.post("/api/network-rules")
+async def create_network_rule(
+    rule_data: models.NetworkRuleCreate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new network rule"""
+    db = get_database()
+    try:
+        success = db.create_network_rule(
+            rule_data.name,
+            rule_data.type,
+            rule_data.mode,
+            rule_data.value_list,
+            rule_data.comment
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create network rule")
+        
+        return models.APIResponse(message=f"Network rule {rule_data.name} created successfully")
+    except Exception as e:
+        logger.error(f"Error creating network rule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create network rule: {str(e)}")
+
+@app.put("/api/network-rules/{rule_name}")
+async def update_network_rule(
+    rule_name: str,
+    rule_data: models.NetworkRuleUpdate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Update an existing network rule"""
+    db = get_database()
+    try:
+        success = db.update_network_rule(
+            rule_name,
+            rule_data.value_list,
+            rule_data.comment
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update network rule")
+        
+        return models.APIResponse(message=f"Network rule {rule_name} updated successfully")
+    except Exception as e:
+        logger.error(f"Error updating network rule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update network rule: {str(e)}")
+
+@app.delete("/api/network-rules/{rule_name}")
+async def delete_network_rule(
+    rule_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete a network rule"""
+    db = get_database()
+    try:
+        success = db.delete_network_rule(rule_name)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete network rule")
+        
+        return models.APIResponse(message=f"Network rule {rule_name} deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting network rule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete network rule: {str(e)}")
+
+@app.get("/api/network-rules/{rule_name}")
+async def describe_network_rule(
+    rule_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get detailed information about a network rule"""
+    db = get_database()
+    try:
+        details = db.describe_network_rule(rule_name)
+        return {"success": True, "data": details}
+    except Exception as e:
+        logger.error(f"Error describing network rule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to describe network rule: {str(e)}")
+
+# Network Policies Endpoints
+@app.get("/api/network-policies")
+async def get_network_policies(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get all network policies"""
+    db = get_database()
+    try:
+        policies = db.get_network_policies()
+        return {"success": True, "data": policies}
+    except Exception as e:
+        logger.error(f"Error getting network policies: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve network policies")
+
+@app.post("/api/network-policies")
+async def create_network_policy(
+    policy_data: models.NetworkPolicyCreate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Create a new network policy"""
+    db = get_database()
+    try:
+        success = db.create_network_policy(
+            policy_data.name,
+            policy_data.allowed_network_rules,
+            policy_data.blocked_network_rules,
+            policy_data.allowed_ip_list,
+            policy_data.blocked_ip_list,
+            policy_data.comment
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create network policy")
+        
+        return models.APIResponse(message=f"Network policy {policy_data.name} created successfully")
+    except Exception as e:
+        logger.error(f"Error creating network policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create network policy: {str(e)}")
+
+@app.put("/api/network-policies/{policy_name}")
+async def update_network_policy(
+    policy_name: str,
+    policy_data: models.NetworkPolicyUpdate,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Update an existing network policy"""
+    db = get_database()
+    try:
+        success = db.update_network_policy(
+            policy_name,
+            policy_data.allowed_network_rules,
+            policy_data.blocked_network_rules,
+            policy_data.allowed_ip_list,
+            policy_data.blocked_ip_list,
+            policy_data.comment
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update network policy")
+        
+        return models.APIResponse(message=f"Network policy {policy_name} updated successfully")
+    except Exception as e:
+        logger.error(f"Error updating network policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update network policy: {str(e)}")
+
+@app.delete("/api/network-policies/{policy_name}")
+async def delete_network_policy(
+    policy_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Delete a network policy"""
+    db = get_database()
+    try:
+        success = db.delete_network_policy(policy_name)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete network policy")
+        
+        return models.APIResponse(message=f"Network policy {policy_name} deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting network policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete network policy: {str(e)}")
+
+@app.get("/api/network-policies/{policy_name}")
+async def describe_network_policy(
+    policy_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get detailed information about a network policy"""
+    db = get_database()
+    try:
+        details = db.describe_network_policy(policy_name)
+        return {"success": True, "data": details}
+    except Exception as e:
+        logger.error(f"Error describing network policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to describe network policy: {str(e)}")
+
+@app.get("/api/debug/policy-details/{policy_name}")
+async def debug_policy_details(policy_name: str):
+    """Debug endpoint to test policy details"""
+    db = get_database()
+    try:
+        # Test policy details
+        details = db.describe_network_policy(policy_name)
+        
+        # Also get the policy from the list for comparison
+        policies = db.get_network_policies()
+        policy_info = None
+        for policy in policies:
+            if policy.get('name') == policy_name:
+                policy_info = policy
+                break
+        
+        return {
+            "policy_name": policy_name,
+            "policy_details": details,
+            "policy_from_list": policy_info,
+            "all_policies": policies,  # Added this to see all available policies
+            "total_policies": len(policies)
+        }
+    except Exception as e:
+        return {"error": f"Failed to get policy details: {str(e)}"}
 
 # --- Analytics Endpoints ---
 @app.post("/api/analytics/credit-usage", response_model=List[models.CreditUsage])
@@ -1872,6 +2307,158 @@ async def get_database_storage_usage(
     except Exception as e:
         logger.error(f"Error getting database storage usage: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve database storage usage data")
+
+# Test endpoint for network rules debugging  
+@app.get("/api/debug/network-rules")
+async def debug_network_rules():
+    """Debug endpoint to check network rules connectivity and privileges"""
+    db = get_database()
+    try:
+        # Test basic connectivity
+        test_query = "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_ACCOUNT()"
+        basic_info = db.execute_query(test_query)
+        
+        # Test if we can show network rules
+        try:
+            rules_query = "SHOW NETWORK RULES IN ACCOUNT"
+            rules = db.execute_query(rules_query)
+            network_rules_status = f"SUCCESS: Found {len(rules)} network rules"
+        except Exception as e:
+            network_rules_status = f"ERROR: {str(e)}"
+            
+        # Test if we can show network policies
+        try:
+            policies_query = "SHOW NETWORK POLICIES IN ACCOUNT"  
+            policies = db.execute_query(policies_query)
+            network_policies_status = f"SUCCESS: Found {len(policies)} network policies"
+        except Exception as e:
+            network_policies_status = f"ERROR: {str(e)}"
+            
+        return {
+            "basic_info": basic_info[0] if basic_info else "No basic info",
+            "network_rules_status": network_rules_status,
+            "network_policies_status": network_policies_status
+        }
+    except Exception as e:
+        return {"error": f"Database connection failed: {str(e)}"}
+
+@app.get("/api/debug/rule-details")
+async def debug_rule_details():
+    """Debug endpoint to test rule details"""
+    db = get_database()
+    try:
+        # Get first rule
+        rules = db.get_network_rules()
+        if rules:
+            first_rule = rules[0]
+            rule_name = first_rule.get('name')
+            
+            # Test rule details
+            if rule_name:
+                details = db.describe_network_rule(rule_name)
+                return {
+                    "rule_list_sample": first_rule,
+                    "rule_details": details,
+                    "total_rules": len(rules)
+                }
+            else:
+                return {"error": "No rule name found"}
+        else:
+            return {"error": "No rules found"}
+    except Exception as e:
+        return {"error": f"Failed to get rule details: {str(e)}"}
+
+@app.get("/api/debug/rule-qualified-name/{rule_name}")
+async def debug_rule_qualified_name(rule_name: str):
+    """Debug endpoint to test qualified name building for network rules"""
+    db = get_database()
+    try:
+        # Get all rules
+        rules = db.get_network_rules()
+        
+        # Find the specific rule
+        rule_info = None
+        for rule in rules:
+            if rule.get('name') == rule_name:
+                rule_info = rule
+                break
+        
+        if not rule_info:
+            return {"error": f"Rule {rule_name} not found"}
+        
+        # Build qualified name
+        database_name = rule_info.get('database_name', '')
+        schema_name = rule_info.get('schema_name', '')
+        
+        if database_name and schema_name:
+            qualified_name = f"{database_name}.{schema_name}.{rule_name}"
+        else:
+            qualified_name = rule_name
+            
+        return {
+            "rule_name": rule_name,
+            "database_name": database_name,
+            "schema_name": schema_name,
+            "qualified_name": qualified_name,
+            "rule_info": rule_info
+        }
+    except Exception as e:
+        return {"error": f"Failed to get qualified name: {str(e)}"}
+
+@app.get("/api/debug/create-test-policy")
+async def debug_create_test_policy():
+    """Debug endpoint to create a test policy with network rules"""
+    db = get_database()
+    try:
+        # Create test policy with network rules
+        test_policy_data = {
+            "allowed_network_rules": ["SLACK_ACCESS_RULE"],
+            "blocked_network_rules": [],
+            "allowed_ip_list": ["192.168.1.0/24"],
+            "blocked_ip_list": [],
+            "comment": "Test policy for debugging"
+        }
+        
+        result = db.create_network_policy("TEST_DEBUG_POLICY", test_policy_data)
+        
+        if result:
+            # Now describe it to see the field names
+            details = db.describe_network_policy("TEST_DEBUG_POLICY")
+            return {
+                "created": True,
+                "policy_details": details
+            }
+        else:
+            return {"created": False, "error": "Failed to create test policy"}
+        
+    except Exception as e:
+        return {"error": f"Failed to create test policy: {str(e)}"}
+
+@app.get("/api/debug/policy-details/{policy_name}")
+async def debug_policy_details(policy_name: str):
+    """Debug endpoint to test policy details"""
+    db = get_database()
+    try:
+        # Test policy details
+        details = db.describe_network_policy(policy_name)
+        
+        # Also get the policy from the list for comparison
+        policies = db.get_network_policies()
+        policy_info = None
+        for policy in policies:
+            if policy.get('name') == policy_name:
+                policy_info = policy
+                break
+        
+        return {
+            "policy_name": policy_name,
+            "policy_details": details,
+            "policy_from_list": policy_info,
+            "all_policies": policies,  # Added this to see all available policies
+            "total_policies": len(policies)
+        }
+    except Exception as e:
+        return {"error": f"Failed to get policy details: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn

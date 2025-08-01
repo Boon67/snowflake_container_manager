@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import uuid
+from datetime import datetime
+import re
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -488,6 +490,20 @@ class SnowflakeConnection:
             
             services = []
             for row in result:
+                created_at = row.get('created_on', '')
+                updated_at = row.get('updated_on', '')
+                
+                # Convert datetime to string if needed
+                if hasattr(created_at, 'isoformat'):
+                    created_at = created_at.isoformat()
+                elif created_at is None:
+                    created_at = ''
+                    
+                if hasattr(updated_at, 'isoformat'):
+                    updated_at = updated_at.isoformat()
+                elif updated_at is None:
+                    updated_at = ''
+                
                 service = {
                     'name': row.get('name', ''),
                     'compute_pool': row.get('compute_pool', ''),
@@ -495,8 +511,8 @@ class SnowflakeConnection:
                     'spec': row.get('spec', ''),
                     'min_instances': row.get('min_instances', 1),
                     'max_instances': row.get('max_instances', 1),
-                    'created_at': row.get('created_on', ''),
-                    'updated_at': row.get('updated_on', ''),
+                    'created_at': created_at,
+                    'updated_at': updated_at,
                     'endpoint_url': row.get('public_endpoints', ''),
                     'dns_name': row.get('dns_name', '')
                 }
@@ -518,13 +534,20 @@ class SnowflakeConnection:
             
             pools = []
             for row in result:
+                created_at = row.get('created_on', '')
+                # Convert datetime to string if needed
+                if hasattr(created_at, 'isoformat'):
+                    created_at = created_at.isoformat()
+                elif created_at is None:
+                    created_at = ''
+                
                 pool = {
                     'name': row.get('name', ''),
                     'state': row.get('state', 'UNKNOWN'),
                     'min_nodes': row.get('min_nodes', 0),
                     'max_nodes': row.get('max_nodes', 0),
                     'instance_family': row.get('instance_family', ''),
-                    'created_at': row.get('created_on', '')
+                    'created_at': created_at
                 }
                 pools.append(pool)
             
@@ -556,6 +579,140 @@ class SnowflakeConnection:
             logger.error(f"❌ Error stopping container service {service_name}: {e}")
             return False
 
+    def create_container_service(self, service_name: str, compute_pool: str, spec: str, 
+                               min_instances: int = 1, max_instances: int = 1) -> bool:
+        """Create a new container service on a compute pool"""
+        # Validate and sanitize service name - Snowflake doesn't allow hyphens
+        if '-' in service_name:
+            logger.warning(f"Service name '{service_name}' contains hyphens, replacing with underscores")
+            service_name = service_name.replace('-', '_')
+        
+        # Validate service name format using regex
+        if not re.match(r'^[a-zA-Z0-9_]+$', service_name):
+            raise ValueError(f"Service name '{service_name}' contains invalid characters. Only letters, numbers, and underscores are allowed.")
+        
+        try:
+            # Basic CREATE SERVICE command
+            query = f"""
+            CREATE SERVICE {service_name}
+            IN COMPUTE POOL {compute_pool}
+            FROM SPECIFICATION $$
+{spec}
+$$
+            """
+            
+            if min_instances and min_instances > 0:
+                query += f" MIN_INSTANCES = {min_instances}"
+            if max_instances and max_instances > 0:
+                query += f" MAX_INSTANCES = {max_instances}"
+            
+            logger.info(f"Creating container service with query: {query[:200]}...")
+            self.execute_non_query(query)
+            logger.info(f"✅ Container service {service_name} created successfully on compute pool {compute_pool}")
+            return True
+        except Exception as e:
+            error_msg = str(e)
+            if "does not exist or not authorized" in error_msg:
+                if "Image repository" in error_msg:
+                    logger.error(f"❌ Image repository not found. Please ensure the image repository exists and you have access to it.")
+                    raise ValueError("Image repository not found. Please ensure the image path in your specification is correct and the repository exists.")
+                elif "Compute pool" in error_msg:
+                    logger.error(f"❌ Compute pool '{compute_pool}' not found or not accessible.")
+                    raise ValueError(f"Compute pool '{compute_pool}' not found or not accessible.")
+                else:
+                    logger.error(f"❌ Resource not found: {error_msg}")
+                    raise ValueError(f"Resource not found: {error_msg}")
+            elif "syntax error" in error_msg:
+                logger.error(f"❌ Syntax error in service specification. Please check your YAML specification.")
+                raise ValueError("Syntax error in service specification. Please check your YAML specification format.")
+            else:
+                logger.error(f"❌ Error creating container service {service_name}: {e}")
+                raise Exception(f"Failed to create container service {service_name}: {str(e)}")
+
+    def drop_container_service(self, service_name: str) -> bool:
+        """Drop/delete a container service"""
+        try:
+            query = f"DROP SERVICE {service_name}"
+            self.execute_non_query(query)
+            logger.info(f"✅ Container service {service_name} dropped successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error dropping container service {service_name}: {e}")
+            return False
+
+    def create_compute_pool(self, pool_name: str, instance_family: str, min_nodes: int = 1, 
+                          max_nodes: int = 1, auto_resume: bool = True, auto_suspend_secs: int = 600) -> bool:
+        """Create a new compute pool"""
+        try:
+            query = f"""
+            CREATE COMPUTE POOL {pool_name}
+            MIN_NODES = {min_nodes}
+            MAX_NODES = {max_nodes}
+            INSTANCE_FAMILY = {instance_family}
+            """
+            
+            if auto_resume:
+                query += " AUTO_RESUME = TRUE"
+            else:
+                query += " AUTO_RESUME = FALSE"
+                
+            if auto_suspend_secs > 0:
+                query += f" AUTO_SUSPEND = {auto_suspend_secs}"
+            
+            self.execute_non_query(query)
+            logger.info(f"✅ Compute pool {pool_name} created successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error creating compute pool {pool_name}: {e}")
+            return False
+
+    def drop_compute_pool(self, pool_name: str) -> bool:
+        """Drop/delete a compute pool"""
+        try:
+            query = f"DROP COMPUTE POOL {pool_name}"
+            self.execute_non_query(query)
+            logger.info(f"✅ Compute pool {pool_name} dropped successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error dropping compute pool {pool_name}: {e}")
+            return False
+
+    def create_image_repository(self, repo_name: str, database_name: str = None, 
+                              schema_name: str = None) -> bool:
+        """Create a new image repository"""
+        try:
+            # Use current database/schema if not specified
+            if database_name and schema_name:
+                repo_ref = f"{database_name}.{schema_name}.{repo_name}"
+            else:
+                repo_ref = repo_name
+            
+            query = f"CREATE IMAGE REPOSITORY {repo_ref}"
+            self.execute_non_query(query)
+            logger.info(f"✅ Image repository {repo_ref} created successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error creating image repository {repo_name}: {e}")
+            return False
+
+    def drop_image_repository(self, repo_name: str, database_name: str = None, 
+                            schema_name: str = None) -> bool:
+        """Drop/delete an image repository"""
+        try:
+            # Use current database/schema if not specified
+            if database_name and schema_name:
+                repo_ref = f"{database_name}.{schema_name}.{repo_name}"
+            else:
+                repo_ref = repo_name
+            
+            query = f"DROP IMAGE REPOSITORY {repo_ref}"
+            self.execute_non_query(query)
+            logger.info(f"✅ Image repository {repo_ref} dropped successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error dropping image repository {repo_name}: {e}")
+            return False
+
     def get_container_service_details(self, service_name: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a specific container service"""
         try:
@@ -565,6 +722,20 @@ class SnowflakeConnection:
             
             if result:
                 service_info = result[0]
+                created_at = service_info.get('created_on', '')
+                updated_at = service_info.get('updated_on', '')
+                
+                # Convert datetime to string if needed
+                if hasattr(created_at, 'isoformat'):
+                    created_at = created_at.isoformat()
+                elif created_at is None:
+                    created_at = ''
+                    
+                if hasattr(updated_at, 'isoformat'):
+                    updated_at = updated_at.isoformat()
+                elif updated_at is None:
+                    updated_at = ''
+                
                 return {
                     'name': service_name,
                     'status': service_info.get('status', 'UNKNOWN'),
@@ -574,14 +745,326 @@ class SnowflakeConnection:
                     'max_instances': service_info.get('max_instances', 1),
                     'endpoint_url': service_info.get('public_endpoints', ''),
                     'dns_name': service_info.get('dns_name', ''),
-                    'created_at': service_info.get('created_on', ''),
-                    'updated_at': service_info.get('updated_on', '')
+                    'created_at': created_at,
+                    'updated_at': updated_at
                 }
             return None
             
         except Exception as e:
             logger.error(f"Error getting container service details for {service_name}: {e}")
             return None
+
+    # Network Rules Management
+    def get_network_rules(self) -> List[Dict[str, Any]]:
+        """Get all network rules"""
+        try:
+            query = "SHOW NETWORK RULES IN ACCOUNT"
+            rules = self.execute_query(query)
+            
+            for rule in rules:
+                # Convert datetime to string for JSON serialization
+                if 'created_on' in rule and hasattr(rule['created_on'], 'isoformat'):
+                    rule['created_on'] = rule['created_on'].isoformat()
+                    
+            return rules
+        except Exception as e:
+            logger.error(f"Error getting network rules: {e}")
+            return []
+
+    def create_network_rule(self, name: str, rule_type: str, mode: str, value_list: List[str], comment: str = None) -> bool:
+        """Create a new network rule"""
+        try:
+            # Format value list for SQL
+            values_str = "', '".join(value_list)
+            
+            query = f"""
+            CREATE NETWORK RULE {name}
+            TYPE = {rule_type}
+            MODE = {mode}
+            VALUE_LIST = ('{values_str}')
+            """
+            
+            if comment:
+                query += f" COMMENT = '{comment}'"
+            
+            self.execute_query(query)
+            logger.info(f"✅ Network rule {name} created successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating network rule {name}: {e}")
+            return False
+
+    def update_network_rule(self, name: str, value_list: List[str], comment: str = None) -> bool:
+        """Update an existing network rule"""
+        try:
+            # First, get the rule to find its fully qualified name
+            rules = self.get_network_rules()
+            rule_info = None
+            for rule in rules:
+                if rule.get('name') == name:
+                    rule_info = rule
+                    break
+            
+            if not rule_info:
+                logger.error(f"Network rule {name} not found in rules list")
+                return False
+            
+            # Build fully qualified name
+            database_name = rule_info.get('database_name', '')
+            schema_name = rule_info.get('schema_name', '')
+            
+            if database_name and schema_name:
+                qualified_name = f"{database_name}.{schema_name}.{name}"
+            else:
+                qualified_name = name
+            
+            # Format value list for SQL
+            values_str = "', '".join(value_list)
+            
+            query = f"""
+            ALTER NETWORK RULE {qualified_name} SET
+            VALUE_LIST = ('{values_str}')
+            """
+            
+            if comment:
+                query += f", COMMENT = '{comment}'"
+            
+            self.execute_query(query)
+            logger.info(f"✅ Network rule {name} updated successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating network rule {name}: {e}")
+            return False
+
+    def delete_network_rule(self, name: str) -> bool:
+        """Delete a network rule"""
+        try:
+            # First, get the rule to find its fully qualified name
+            rules = self.get_network_rules()
+            rule_info = None
+            for rule in rules:
+                if rule.get('name') == name:
+                    rule_info = rule
+                    break
+            
+            if not rule_info:
+                logger.error(f"Network rule {name} not found in rules list")
+                return False
+            
+            # Build fully qualified name
+            database_name = rule_info.get('database_name', '')
+            schema_name = rule_info.get('schema_name', '')
+            
+            if database_name and schema_name:
+                qualified_name = f"{database_name}.{schema_name}.{name}"
+            else:
+                qualified_name = name
+            
+            query = f"DROP NETWORK RULE {qualified_name}"
+            self.execute_query(query)
+            logger.info(f"✅ Network rule {name} deleted successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error deleting network rule {name}: {e}")
+            return False
+
+    def describe_network_rule(self, name: str) -> Dict[str, Any]:
+        """Get detailed information about a network rule"""
+        try:
+            # First, get the rule to find its fully qualified name
+            rules = self.get_network_rules()
+            rule_info = None
+            for rule in rules:
+                if rule.get('name') == name:
+                    rule_info = rule
+                    break
+            
+            if not rule_info:
+                logger.error(f"Network rule {name} not found in rules list")
+                return {}
+            
+            # Build fully qualified name
+            database_name = rule_info.get('database_name', '')
+            schema_name = rule_info.get('schema_name', '')
+            
+            if database_name and schema_name:
+                qualified_name = f"{database_name}.{schema_name}.{name}"
+            else:
+                qualified_name = name
+            
+            query = f"DESCRIBE NETWORK RULE {qualified_name}"
+            result = self.execute_query(query)
+            return result[0] if result else {}
+            
+        except Exception as e:
+            logger.error(f"Error describing network rule {name}: {e}")
+            return {}
+
+    # Network Policies Management
+    def get_network_policies(self) -> List[Dict[str, Any]]:
+        """Get all network policies"""
+        try:
+            query = "SHOW NETWORK POLICIES IN ACCOUNT"
+            policies = self.execute_query(query)
+            
+            for policy in policies:
+                # Convert datetime to string for JSON serialization
+                if 'created_on' in policy and hasattr(policy['created_on'], 'isoformat'):
+                    policy['created_on'] = policy['created_on'].isoformat()
+                    
+            return policies
+        except Exception as e:
+            logger.error(f"Error getting network policies: {e}")
+            return []
+
+    def create_network_policy(self, name: str, allowed_network_rules: List[str] = None, 
+                            blocked_network_rules: List[str] = None, allowed_ip_list: List[str] = None,
+                            blocked_ip_list: List[str] = None, comment: str = None) -> bool:
+        """Create a new network policy"""
+        try:
+            query = f"CREATE NETWORK POLICY {name}"
+            
+            conditions = []
+            
+            if allowed_network_rules:
+                rules_str = "', '".join(allowed_network_rules)
+                conditions.append(f"ALLOWED_NETWORK_RULE_LIST = ('{rules_str}')")
+            
+            if blocked_network_rules:
+                rules_str = "', '".join(blocked_network_rules)
+                conditions.append(f"BLOCKED_NETWORK_RULE_LIST = ('{rules_str}')")
+                
+            if allowed_ip_list:
+                ips_str = "', '".join(allowed_ip_list)
+                conditions.append(f"ALLOWED_IP_LIST = ('{ips_str}')")
+                
+            if blocked_ip_list:
+                ips_str = "', '".join(blocked_ip_list)
+                conditions.append(f"BLOCKED_IP_LIST = ('{ips_str}')")
+                
+            if comment:
+                conditions.append(f"COMMENT = '{comment}'")
+            
+            if conditions:
+                query += " " + " ".join(conditions)
+            
+            self.execute_query(query)
+            logger.info(f"✅ Network policy {name} created successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating network policy {name}: {e}")
+            return False
+
+    def update_network_policy(self, name: str, allowed_network_rules: List[str] = None,
+                            blocked_network_rules: List[str] = None, allowed_ip_list: List[str] = None,
+                            blocked_ip_list: List[str] = None, comment: str = None) -> bool:
+        """Update an existing network policy"""
+        try:
+            conditions = []
+            
+            if allowed_network_rules is not None:
+                if allowed_network_rules:
+                    rules_str = "', '".join(allowed_network_rules)
+                    conditions.append(f"ALLOWED_NETWORK_RULE_LIST = ('{rules_str}')")
+                else:
+                    conditions.append("ALLOWED_NETWORK_RULE_LIST = ()")
+            
+            if blocked_network_rules is not None:
+                if blocked_network_rules:
+                    rules_str = "', '".join(blocked_network_rules)
+                    conditions.append(f"BLOCKED_NETWORK_RULE_LIST = ('{rules_str}')")
+                else:
+                    conditions.append("BLOCKED_NETWORK_RULE_LIST = ()")
+                
+            if allowed_ip_list is not None:
+                if allowed_ip_list:
+                    ips_str = "', '".join(allowed_ip_list)
+                    conditions.append(f"ALLOWED_IP_LIST = ('{ips_str}')")
+                else:
+                    conditions.append("ALLOWED_IP_LIST = ()")
+                
+            if blocked_ip_list is not None:
+                if blocked_ip_list:
+                    ips_str = "', '".join(blocked_ip_list)
+                    conditions.append(f"BLOCKED_IP_LIST = ('{ips_str}')")
+                else:
+                    conditions.append("BLOCKED_IP_LIST = ()")
+                
+            if comment:
+                conditions.append(f"COMMENT = '{comment}'")
+            
+            if conditions:
+                query = f"ALTER NETWORK POLICY {name} SET " + ", ".join(conditions)
+                self.execute_query(query)
+                logger.info(f"✅ Network policy {name} updated successfully")
+                return True
+            else:
+                logger.warning(f"No changes specified for network policy {name}")
+                return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating network policy {name}: {e}")
+            return False
+
+    def delete_network_policy(self, name: str) -> bool:
+        """Delete a network policy"""
+        try:
+            query = f"DROP NETWORK POLICY {name}"
+            self.execute_query(query)
+            logger.info(f"✅ Network policy {name} deleted successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error deleting network policy {name}: {e}")
+            return False
+
+    def describe_network_policy(self, name: str) -> Dict[str, Any]:
+        """Get detailed information about a network policy"""
+        try:
+            query = f"DESCRIBE NETWORK POLICY {name}"
+            result = self.execute_query(query)
+            
+            # DESCRIBE NETWORK POLICY returns multiple rows, each with a 'name' and 'value' field
+            # Convert this to a flat dictionary with frontend-expected field names
+            policy_details = {
+                'name': name,
+                'allowed_ip_list': '',
+                'blocked_ip_list': '',
+                'allowed_network_rule_list': '',
+                'blocked_network_rule_list': '',
+                'comment': ''
+            }
+            
+            for row in result:
+                property_name = row.get('name', '').lower()
+                property_value = row.get('value', '')
+                
+                # Map Snowflake property names to frontend expected names
+                if property_name == 'allowed_ip_list':
+                    policy_details['allowed_ip_list'] = property_value
+                elif property_name == 'blocked_ip_list':
+                    policy_details['blocked_ip_list'] = property_value
+                elif property_name == 'allowed_network_rule_list' or property_name == 'allowed_network_rules':
+                    policy_details['allowed_network_rule_list'] = property_value
+                elif property_name == 'blocked_network_rule_list' or property_name == 'blocked_network_rules':
+                    policy_details['blocked_network_rule_list'] = property_value
+                elif property_name == 'comment':
+                    policy_details['comment'] = property_value
+                elif property_name == 'created_on':
+                    policy_details['created_on'] = property_value
+                elif property_name:
+                    # Store any other properties as-is
+                    policy_details[property_name] = property_value
+            
+            return policy_details
+            
+        except Exception as e:
+            logger.error(f"Error describing network policy {name}: {e}")
+            return {}
 
     def suspend_compute_pool(self, pool_name: str) -> bool:
         """Suspend a compute pool"""
@@ -606,113 +1089,297 @@ class SnowflakeConnection:
             return False
 
     def get_compute_pool_logs(self, pool_name: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get logs for a compute pool"""
+        """Get logs for a compute pool from Snowflake system views"""
         try:
-            # Try to get logs from INFORMATION_SCHEMA or use a mock response
-            # Note: Snowflake may not expose compute pool logs directly via SQL
-            # This is a placeholder that would need to be implemented based on available Snowflake APIs
+            logs = []
             
-            query = f"""
+            # Get container services activity on this compute pool (primary source of logs)
+            services_query = f"""
             SELECT 
-                CURRENT_TIMESTAMP() as timestamp,
-                'INFO' as level,
-                'Compute pool {pool_name} operational' as message,
-                'system' as component
-            UNION ALL
-            SELECT 
-                DATEADD('minute', -5, CURRENT_TIMESTAMP()) as timestamp,
-                'INFO' as level,
-                'Node scaling completed' as message,
-                'autoscaler' as component
-            UNION ALL
-            SELECT 
-                DATEADD('minute', -10, CURRENT_TIMESTAMP()) as timestamp,
-                'WARN' as level,
-                'High CPU utilization detected' as message,
-                'monitor' as component
-            ORDER BY timestamp DESC
-            LIMIT {limit}
+                START_TIME as timestamp,
+                CASE 
+                    WHEN CREDITS_USED > 1 THEN 'WARN'
+                    WHEN CREDITS_USED IS NULL THEN 'INFO'
+                    ELSE 'INFO'
+                END as level,
+                CASE 
+                    WHEN APPLICATION_NAME IS NOT NULL AND CREDITS_USED IS NOT NULL THEN 
+                        CONCAT('Service ', APPLICATION_NAME, ' used ', ROUND(CREDITS_USED, 4), ' credits')
+                    WHEN APPLICATION_NAME IS NOT NULL THEN 
+                        CONCAT('Service ', APPLICATION_NAME, ' activity recorded')
+                    ELSE 
+                        'Container service activity'
+                END as message,
+                'container-service' as component,
+                APPLICATION_NAME,
+                CREDITS_USED
+            FROM SNOWFLAKE.ACCOUNT_USAGE.SNOWPARK_CONTAINER_SERVICES_HISTORY
+            WHERE COMPUTE_POOL_NAME = %s
+            AND START_TIME >= DATEADD('day', -7, CURRENT_TIMESTAMP())
+            ORDER BY START_TIME DESC
+            LIMIT {min(limit, 100)}
             """
             
-            result = self.execute_query(query)
+            try:
+                services_history = self.execute_query(services_query, (pool_name,))
+                for row in services_history:
+                    timestamp = row.get('TIMESTAMP', '')
+                    if hasattr(timestamp, 'isoformat'):
+                        timestamp = timestamp.isoformat()
+                    
+                    logs.append({
+                        'timestamp': timestamp,
+                        'level': row.get('LEVEL', 'INFO'),
+                        'message': row.get('MESSAGE', 'Container service activity'),
+                        'component': 'container-service'
+                    })
+            except Exception as e:
+                logger.warning(f"Could not fetch container services history: {e}")
             
-            logs = []
-            for row in result:
-                log_entry = {
-                    'timestamp': row.get('TIMESTAMP', ''),
-                    'level': row.get('LEVEL', 'INFO'),
-                    'message': row.get('MESSAGE', ''),
-                    'component': row.get('COMPONENT', 'system')
-                }
-                logs.append(log_entry)
+            # Get query activity that might be related to compute pools
+            # Note: COMPUTE_POOL_NAME column may not exist in all Snowflake versions
+            try:
+                # First, try to see if we can get any recent queries that might be related
+                query_activity_query = f"""
+                SELECT 
+                    START_TIME as timestamp,
+                    CASE 
+                        WHEN EXECUTION_STATUS = 'FAIL' THEN 'ERROR'
+                        WHEN EXECUTION_STATUS = 'CANCELLED' THEN 'WARN'
+                        WHEN TOTAL_ELAPSED_TIME > 60000 THEN 'WARN'
+                        ELSE 'INFO'
+                    END as level,
+                    CONCAT('Query executed - Status: ', EXECUTION_STATUS, ', Duration: ', ROUND(TOTAL_ELAPSED_TIME/1000, 2), 's', 
+                           CASE WHEN WAREHOUSE_NAME IS NOT NULL THEN CONCAT(', Warehouse: ', WAREHOUSE_NAME) ELSE '' END) as message,
+                    'query-engine' as component
+                FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+                WHERE START_TIME >= DATEADD('day', -1, CURRENT_TIMESTAMP())
+                AND (QUERY_TEXT ILIKE '%{pool_name}%' OR WAREHOUSE_NAME ILIKE '%{pool_name}%')
+                ORDER BY START_TIME DESC
+                LIMIT 10
+                """
+                
+                query_history = self.execute_query(query_activity_query)
+                for row in query_history:
+                    timestamp = row.get('TIMESTAMP', '')
+                    if hasattr(timestamp, 'isoformat'):
+                        timestamp = timestamp.isoformat()
+                    
+                    logs.append({
+                        'timestamp': timestamp,
+                        'level': row.get('LEVEL', 'INFO'),
+                        'message': row.get('MESSAGE', 'Query activity'),
+                        'component': 'query-engine'
+                    })
+            except Exception as e:
+                logger.warning(f"Could not fetch query history: {e}")
             
-            return logs
+            # Try to get compute pool status information
+            try:
+                status_query = f"""
+                SELECT 
+                    CURRENT_TIMESTAMP() as timestamp,
+                    'INFO' as level,
+                    CONCAT('Current compute pool status check - Pool: {pool_name}') as message,
+                    'system' as component
+                """
+                
+                status_result = self.execute_query(status_query)
+                if status_result:
+                    logs.append({
+                        'timestamp': datetime.now().isoformat(),
+                        'level': 'INFO',
+                        'message': f'Status check completed for compute pool {pool_name}',
+                        'component': 'system'
+                    })
+            except Exception as e:
+                logger.warning(f"Could not fetch status info: {e}")
+            
+            # Sort all logs by timestamp (newest first)
+            logs.sort(key=lambda x: x['timestamp'], reverse=True)
+            
+            # If no logs found, add a status message
+            if not logs:
+                logs.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'level': 'INFO',
+                    'message': f'No recent activity found for compute pool {pool_name}. Pool may be suspended or inactive.',
+                    'component': 'system'
+                })
+            
+            return logs[:limit]
             
         except Exception as e:
             logger.error(f"Error getting logs for compute pool {pool_name}: {e}")
-            # Return mock logs for demo purposes
-            return self._generate_mock_compute_pool_logs(pool_name, limit)
+            # Return a single error log entry instead of mock data
+            return [{
+                'timestamp': datetime.now().isoformat(),
+                'level': 'ERROR',
+                'message': f'Failed to retrieve logs for compute pool {pool_name}: {str(e)}',
+                'component': 'system'
+            }]
 
-    def _generate_mock_compute_pool_logs(self, pool_name: str, limit: int) -> List[Dict[str, Any]]:
-        """Generate mock logs for compute pool (for demo purposes)"""
-        import random
-        from datetime import datetime, timedelta
-        
-        log_levels = ['INFO', 'WARN', 'ERROR', 'DEBUG']
-        components = ['system', 'autoscaler', 'monitor', 'scheduler', 'network']
-        
-        messages = {
-            'INFO': [
-                f'Compute pool {pool_name} is operational',
-                f'Node scaling completed successfully',
-                f'Health check passed for {pool_name}',
-                f'Compute pool {pool_name} resumed from suspended state',
-                f'Auto-scaling policy applied',
-                f'Container deployment completed',
-                f'Network configuration updated'
-            ],
-            'WARN': [
-                f'High CPU utilization detected on {pool_name}',
-                f'Memory usage approaching threshold',
-                f'Node scaling in progress',
-                f'Temporary network latency detected',
-                f'Queue depth increasing',
-                f'Disk space usage high'
-            ],
-            'ERROR': [
-                f'Failed to scale node in {pool_name}',
-                f'Container startup failed',
-                f'Network connectivity issue',
-                f'Resource allocation error',
-                f'Authentication failure'
-            ],
-            'DEBUG': [
-                f'Heartbeat received from {pool_name}',
-                f'Resource metrics collected',
-                f'Configuration validation passed',
-                f'Cache cleared successfully',
-                f'Performance metrics updated'
-            ]
-        }
-        
-        logs = []
-        current_time = datetime.now()
-        
-        for i in range(min(limit, 50)):  # Cap at 50 mock entries
-            level = random.choice(log_levels)
-            component = random.choice(components)
-            message = random.choice(messages[level])
+    def get_image_repositories(self) -> List[Dict[str, Any]]:
+        """Get all image repositories across the entire account"""
+        try:
+            # Get all image repositories in the account from Snowflake
+            query = "SHOW IMAGE REPOSITORIES IN ACCOUNT"
+            result = self.execute_query(query)
             
-            log_time = current_time - timedelta(minutes=i * random.randint(1, 10))
+            repositories = []
+            for row in result:
+                repository = {
+                    'name': row.get('name', ''),
+                    'database': row.get('database_name', ''),
+                    'schema': row.get('schema_name', ''),
+                    'repository_url': row.get('repository_url', ''),
+                    'created_at': row.get('created_on', ''),
+                    'updated_at': row.get('updated_on', ''),
+                    'owner': row.get('owner', ''),
+                    'comment': row.get('comment', '')
+                }
+                repositories.append(repository)
             
-            logs.append({
-                'timestamp': log_time.isoformat(),
-                'level': level,
-                'message': message,
-                'component': component
-            })
-        
-        return logs
+            logger.info(f"Found {len(repositories)} image repositories in account")
+            return repositories
+            
+        except Exception as e:
+            logger.error(f"Error getting image repositories in account: {e}")
+            return []
+
+    def get_repository_images(self, repository_name: str, database_name: str = None, schema_name: str = None) -> List[Dict[str, Any]]:
+        """Get all images in a specific repository"""
+        try:
+            # Build the repository reference
+            if database_name and schema_name:
+                repo_ref = f"{database_name}.{schema_name}.{repository_name}"
+            else:
+                repo_ref = repository_name
+            
+            # Get images from the repository
+            query = f"SHOW IMAGES IN IMAGE REPOSITORY {repo_ref}"
+            result = self.execute_query(query)
+            
+            images = []
+            for row in result:
+                image = {
+                    'repository_name': repository_name,
+                    'image_name': row.get('image_name', ''),
+                    'tag': row.get('tag', ''),
+                    'digest': row.get('digest', ''),
+                    'size_bytes': row.get('size_bytes', 0),
+                    'created_at': row.get('created_on', ''),
+                    'uploaded_at': row.get('uploaded_on', ''),
+                    'architecture': row.get('architecture', ''),
+                    'os': row.get('os', ''),
+                    'media_type': row.get('media_type', '')
+                }
+                images.append(image)
+            
+            return images
+            
+        except Exception as e:
+            logger.error(f"Error getting images for repository {repository_name}: {e}")
+            return []
+
+    def get_all_images(self) -> List[Dict[str, Any]]:
+        """Get all images across all repositories in the account"""
+        try:
+            all_images = []
+            repositories = self.get_image_repositories()
+            
+            logger.info(f"Iterating through {len(repositories)} repositories to get all images")
+            
+            for repo in repositories:
+                try:
+                    repo_images = self.get_repository_images(
+                        repo['name'], 
+                        repo['database'], 
+                        repo['schema']
+                    )
+                    
+                    logger.info(f"Found {len(repo_images)} images in repository {repo['database']}.{repo['schema']}.{repo['name']}")
+                    
+                    # Add repository info to each image
+                    for image in repo_images:
+                        image['repository_database'] = repo['database']
+                        image['repository_schema'] = repo['schema']
+                        image['repository_url'] = repo['repository_url']
+                    
+                    all_images.extend(repo_images)
+                    
+                except Exception as repo_error:
+                    logger.warning(f"Error getting images from repository {repo['name']}: {repo_error}")
+                    continue
+            
+            logger.info(f"Total images found across all repositories: {len(all_images)}")
+            return all_images
+            
+        except Exception as e:
+            logger.error(f"Error getting all images: {e}")
+            return []
+
+    def get_databases(self) -> List[Dict[str, Any]]:
+        """Get all databases in the account"""
+        try:
+            query = "SHOW DATABASES"
+            result = self.execute_query(query)
+            
+            databases = []
+            for row in result:
+                created_on = row.get('created_on', '')
+                # Convert datetime to string if needed
+                if hasattr(created_on, 'isoformat'):
+                    created_on = created_on.isoformat()
+                elif created_on is None:
+                    created_on = ''
+                
+                database = {
+                    'name': row.get('name', ''),
+                    'created_on': created_on,
+                    'comment': row.get('comment', ''),
+                    'owner': row.get('owner', ''),
+                    'retention_time': row.get('retention_time', 1)
+                }
+                databases.append(database)
+            
+            logger.info(f"Found {len(databases)} databases")
+            return databases
+            
+        except Exception as e:
+            logger.error(f"Error getting databases: {e}")
+            return []
+
+    def get_schemas(self, database_name: str) -> List[Dict[str, Any]]:
+        """Get all schemas for a specific database"""
+        try:
+            query = f"SHOW SCHEMAS IN DATABASE {database_name}"
+            result = self.execute_query(query)
+            
+            schemas = []
+            for row in result:
+                created_on = row.get('created_on', '')
+                # Convert datetime to string if needed
+                if hasattr(created_on, 'isoformat'):
+                    created_on = created_on.isoformat()
+                elif created_on is None:
+                    created_on = ''
+                
+                schema = {
+                    'name': row.get('name', ''),
+                    'database_name': database_name,
+                    'created_on': created_on,
+                    'comment': row.get('comment', ''),
+                    'owner': row.get('owner', '')
+                }
+                schemas.append(schema)
+            
+            logger.info(f"Found {len(schemas)} schemas in database {database_name}")
+            return schemas
+            
+        except Exception as e:
+            logger.error(f"Error getting schemas for database {database_name}: {e}")
+            return []
 
     def get_daily_credit_rollup(self, start_date=None, end_date=None, compute_pool_names=None):
         """Get daily credit usage rollup from Snowpark Container Services history"""
