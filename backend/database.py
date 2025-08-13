@@ -1,4 +1,5 @@
 import snowflake.connector
+import snowflake.connector.errors
 import os
 import logging
 from typing import Optional, List, Dict, Any
@@ -525,7 +526,7 @@ class SnowflakeConnection:
             return []
 
     def get_compute_pools(self) -> List[Dict[str, Any]]:
-        """Get all compute pools"""
+        """Get all compute pools with detailed information"""
         try:
             query = """
             SHOW COMPUTE POOLS
@@ -541,13 +542,28 @@ class SnowflakeConnection:
                 elif created_at is None:
                     created_at = ''
                 
+                pool_name = row.get('name', '')
+                
+                # Get detailed information using DESCRIBE COMPUTE POOL
+                pool_details = self.describe_compute_pool(pool_name)
+                
                 pool = {
-                    'name': row.get('name', ''),
+                    'name': pool_name,
                     'state': row.get('state', 'UNKNOWN'),
                     'min_nodes': row.get('min_nodes', 0),
                     'max_nodes': row.get('max_nodes', 0),
                     'instance_family': row.get('instance_family', ''),
-                    'created_at': created_at
+                    'created_at': created_at,
+                    # Add detailed information from DESCRIBE
+                    'owner': pool_details.get('owner', ''),
+                    'comment': pool_details.get('comment', ''),
+                    'auto_resume': pool_details.get('auto_resume', ''),
+                    'auto_suspend_secs': pool_details.get('auto_suspend_secs', ''),
+                    'num_nodes': pool_details.get('num_nodes', 0),
+                    'active_nodes': pool_details.get('active_nodes', 0),
+                    'idle_nodes': pool_details.get('idle_nodes', 0),
+                    'total_uptime': pool_details.get('total_uptime', ''),
+                    'resource_utilization': pool_details.get('resource_utilization', '')
                 }
                 pools.append(pool)
             
@@ -644,27 +660,85 @@ $$
                           max_nodes: int = 1, auto_resume: bool = True, auto_suspend_secs: int = 600) -> bool:
         """Create a new compute pool"""
         try:
-            query = f"""
-            CREATE COMPUTE POOL {pool_name}
-            MIN_NODES = {min_nodes}
-            MAX_NODES = {max_nodes}
-            INSTANCE_FAMILY = {instance_family}
-            """
+            # Validate input parameters
+            if not pool_name or not pool_name.strip():
+                logger.error("Pool name cannot be empty")
+                return False
+                
+            if not instance_family or not instance_family.strip():
+                logger.error("Instance family cannot be empty")
+                return False
+                
+            # Validate node counts
+            if min_nodes <= 0:
+                logger.error(f"min_nodes must be greater than 0, got {min_nodes}")
+                return False
+                
+            if max_nodes <= 0:
+                logger.error(f"max_nodes must be greater than 0, got {max_nodes}")
+                return False
+                
+            if max_nodes < min_nodes:
+                logger.error(f"max_nodes ({max_nodes}) must be >= min_nodes ({min_nodes})")
+                return False
+                
+            # Sanitize pool name - replace hyphens with underscores for Snowflake compatibility
+            safe_pool_name = pool_name.replace('-', '_')
+            if safe_pool_name != pool_name:
+                logger.info(f"Pool name changed from '{pool_name}' to '{safe_pool_name}' for Snowflake compatibility")
+            
+            # Build the base query with proper Snowflake syntax
+            # According to Snowflake docs, INSTANCE_FAMILY should be quoted
+            query_parts = [
+                f"CREATE COMPUTE POOL {safe_pool_name}",
+                f"MIN_NODES = {min_nodes}",
+                f"MAX_NODES = {max_nodes}",
+                f"INSTANCE_FAMILY = '{instance_family}'"
+            ]
             
             if auto_resume:
-                query += " AUTO_RESUME = TRUE"
+                query_parts.append("AUTO_RESUME = TRUE")
             else:
-                query += " AUTO_RESUME = FALSE"
+                query_parts.append("AUTO_RESUME = FALSE")
                 
             if auto_suspend_secs > 0:
-                query += f" AUTO_SUSPEND = {auto_suspend_secs}"
+                query_parts.append(f"AUTO_SUSPEND_SECS = {auto_suspend_secs}")
             
+            # Join all parts with proper spacing
+            query = " ".join(query_parts)
+
+            logger.info(f"Executing compute pool creation query: {query}")
+            logger.debug(f"Query parts: {query_parts}")
+            logger.debug(f"Instance family value: {instance_family}")
             self.execute_non_query(query)
-            logger.info(f"✅ Compute pool {pool_name} created successfully")
+            logger.info(f"✅ Compute pool {safe_pool_name} created successfully")
             return True
         except Exception as e:
             logger.error(f"❌ Error creating compute pool {pool_name}: {e}")
+            logger.error(f"Failed query: {query if 'query' in locals() else 'Query not constructed'}")
+            logger.error(f"Parameters: pool_name={pool_name}, instance_family={instance_family}, min_nodes={min_nodes}, max_nodes={max_nodes}, auto_resume={auto_resume}, auto_suspend_secs={auto_suspend_secs}")
             return False
+
+    def describe_compute_pool(self, pool_name: str) -> Dict[str, Any]:
+        """Get detailed information about a compute pool"""
+        try:
+            query = f"DESCRIBE COMPUTE POOL {pool_name}"
+            result = self.execute_query(query)
+            
+            # Convert result to a more usable format
+            pool_details = {}
+            if result:
+                for row in result:
+                    # DESCRIBE COMPUTE POOL returns rows with property and value columns
+                    property_name = row.get('property', '').lower()
+                    property_value = row.get('value', '')
+                    pool_details[property_name] = property_value
+                    
+            logger.info(f"✅ Retrieved detailed info for compute pool {pool_name}")
+            return pool_details
+        except Exception as e:
+            logger.error(f"❌ Error describing compute pool {pool_name}: {e}")
+            return {}
 
     def drop_compute_pool(self, pool_name: str) -> bool:
         """Drop/delete a compute pool"""
@@ -774,26 +848,62 @@ $$
     def create_network_rule(self, name: str, rule_type: str, mode: str, value_list: List[str], comment: str = None) -> bool:
         """Create a new network rule"""
         try:
-            # Format value list for SQL
-            values_str = "', '".join(value_list)
+            # Debug logging
+            logger.info(f"Creating network rule {name} with value_list: {value_list} (type: {type(value_list)})")
+            
+            # Format value list for SQL - each value should be quoted individually
+            if not value_list or len(value_list) == 0:
+                raise ValueError("value_list cannot be empty")
+            
+            # Create properly formatted SQL values
+            formatted_values = []
+            for value in value_list:
+                # Escape any single quotes in the value and wrap in quotes
+                escaped_value = str(value).replace("'", "''")
+                formatted_values.append(f"'{escaped_value}'")
+            
+            values_clause = "(" + ", ".join(formatted_values) + ")"
             
             query = f"""
             CREATE NETWORK RULE {name}
             TYPE = {rule_type}
             MODE = {mode}
-            VALUE_LIST = ('{values_str}')
+            VALUE_LIST = {values_clause}
             """
             
             if comment:
-                query += f" COMMENT = '{comment}'"
+                escaped_comment = str(comment).replace("'", "''")
+                query += f" COMMENT = '{escaped_comment}'"
             
-            self.execute_query(query)
+            logger.info(f"Generated SQL: {query.strip()}")
+            
+            # Use execute_non_query for CREATE statements
+            self.execute_non_query(query)
             logger.info(f"✅ Network rule {name} created successfully")
             return True
             
+        except snowflake.connector.errors.ProgrammingError as e:
+            error_msg = str(e)
+            logger.error(f"❌ Snowflake error creating network rule {name}: {e}")
+            
+            # Check for specific permission errors
+            if "insufficient privileges" in error_msg.lower() or "access denied" in error_msg.lower():
+                raise ValueError(f"Insufficient privileges to create network rule. Your role lacks the CREATE NETWORK RULE privilege. Error: {error_msg}")
+            elif "already exists" in error_msg.lower():
+                raise ValueError(f"Network rule '{name}' already exists. Choose a different name.")
+            elif "invalid" in error_msg.lower() and ("value" in error_msg.lower() or "type" in error_msg.lower() or "mode" in error_msg.lower()):
+                raise ValueError(f"Invalid network rule configuration. Check the TYPE, MODE, or VALUE_LIST parameters. Error: {error_msg}")
+            elif "not supported" in error_msg.lower() or "mode" in error_msg.lower():
+                if "IPv4" in error_msg and "EGRESS" in error_msg:
+                    raise ValueError(f"Invalid TYPE/MODE combination: IPv4 network rules only support INGRESS mode, not EGRESS. Use HOST_PORT type for outbound (EGRESS) rules.")
+                else:
+                    raise ValueError(f"Unsupported network rule configuration. Valid combinations: IPv4+INGRESS, HOST_PORT+EGRESS, AWSVPCEID+EGRESS. Error: {error_msg}")
+            else:
+                # Re-raise the original Snowflake error for other programming errors
+                raise ValueError(f"Failed to create network rule due to Snowflake error: {error_msg}")
         except Exception as e:
-            logger.error(f"❌ Error creating network rule {name}: {e}")
-            return False
+            logger.error(f"❌ Unexpected error creating network rule {name}: {e}")
+            raise ValueError(f"Unexpected error creating network rule: {str(e)}")
 
     def update_network_rule(self, name: str, value_list: List[str], comment: str = None) -> bool:
         """Update an existing network rule"""
@@ -819,16 +929,27 @@ $$
             else:
                 qualified_name = name
             
-            # Format value list for SQL
-            values_str = "', '".join(value_list)
+            # Format value list for SQL - each value should be quoted individually
+            if not value_list or len(value_list) == 0:
+                raise ValueError("value_list cannot be empty")
+            
+            # Create properly formatted SQL values
+            formatted_values = []
+            for value in value_list:
+                # Escape any single quotes in the value and wrap in quotes
+                escaped_value = str(value).replace("'", "''")
+                formatted_values.append(f"'{escaped_value}'")
+            
+            values_clause = "(" + ", ".join(formatted_values) + ")"
             
             query = f"""
             ALTER NETWORK RULE {qualified_name} SET
-            VALUE_LIST = ('{values_str}')
+            VALUE_LIST = {values_clause}
             """
             
             if comment:
-                query += f", COMMENT = '{comment}'"
+                escaped_comment = str(comment).replace("'", "''")
+                query += f", COMMENT = '{escaped_comment}'"
             
             self.execute_query(query)
             logger.info(f"✅ Network rule {name} updated successfully")
@@ -868,7 +989,17 @@ $$
             return True
             
         except Exception as e:
+            error_message = str(e)
             logger.error(f"❌ Error deleting network rule {name}: {e}")
+            
+            # Check for specific Snowflake errors and provide better error messages
+            if "does not exist" in error_message:
+                raise ValueError(f"Network rule '{name}' does not exist.")
+            elif "not authorized" in error_message:
+                raise ValueError(f"Not authorized to delete network rule '{name}'.")
+            else:
+                raise ValueError(f"Failed to delete network rule '{name}': {error_message}")
+            
             return False
 
     def describe_network_rule(self, name: str) -> Dict[str, Any]:
@@ -951,19 +1082,37 @@ $$
             if conditions:
                 query += " " + " ".join(conditions)
             
-            self.execute_query(query)
+            # Use execute_non_query for CREATE statements
+            self.execute_non_query(query)
             logger.info(f"✅ Network policy {name} created successfully")
             return True
             
+        except snowflake.connector.errors.ProgrammingError as e:
+            error_msg = str(e)
+            logger.error(f"❌ Snowflake error creating network policy {name}: {e}")
+            
+            # Check for specific permission errors
+            if "insufficient privileges" in error_msg.lower() or "access denied" in error_msg.lower():
+                raise ValueError(f"Insufficient privileges to create network policy. Your role lacks the CREATE NETWORK POLICY privilege. Error: {error_msg}")
+            elif "does not exist or not authorized" in error_msg.lower():
+                raise ValueError(f"One or more referenced network rules do not exist or you lack access to them. Error: {error_msg}")
+            elif "already exists" in error_msg.lower():
+                raise ValueError(f"Network policy '{name}' already exists. Choose a different name.")
+            elif "invalid" in error_msg.lower() and ("ip" in error_msg.lower() or "cidr" in error_msg.lower()):
+                raise ValueError(f"Invalid IP address or CIDR format in the policy configuration. Error: {error_msg}")
+            else:
+                # Re-raise the original Snowflake error for other programming errors
+                raise ValueError(f"Failed to create network policy due to Snowflake error: {error_msg}")
         except Exception as e:
-            logger.error(f"❌ Error creating network policy {name}: {e}")
-            return False
+            logger.error(f"❌ Unexpected error creating network policy {name}: {e}")
+            raise ValueError(f"Unexpected error creating network policy: {str(e)}")
 
     def update_network_policy(self, name: str, allowed_network_rules: List[str] = None,
                             blocked_network_rules: List[str] = None, allowed_ip_list: List[str] = None,
                             blocked_ip_list: List[str] = None, comment: str = None) -> bool:
         """Update an existing network policy"""
         try:
+            # Network policies are account-level objects, no qualified name needed
             conditions = []
             
             if allowed_network_rules is not None:
@@ -1013,18 +1162,30 @@ $$
     def delete_network_policy(self, name: str) -> bool:
         """Delete a network policy"""
         try:
+            # Network policies are account-level objects, no qualified name needed
             query = f"DROP NETWORK POLICY {name}"
             self.execute_query(query)
             logger.info(f"✅ Network policy {name} deleted successfully")
             return True
             
         except Exception as e:
+            error_message = str(e)
             logger.error(f"❌ Error deleting network policy {name}: {e}")
+            
+            # Check for specific Snowflake errors and provide better error messages
+            if "policy is attached to ACCOUNT" in error_message:
+                raise ValueError(f"Cannot delete network policy '{name}' because it is currently attached to the account. Please unset the policy from the account first before deleting it.")
+            elif "does not exist" in error_message:
+                raise ValueError(f"Network policy '{name}' does not exist.")
+            else:
+                raise ValueError(f"Failed to delete network policy '{name}': {error_message}")
+            
             return False
 
     def describe_network_policy(self, name: str) -> Dict[str, Any]:
         """Get detailed information about a network policy"""
         try:
+            # Network policies are account-level objects, no qualified name needed
             query = f"DESCRIBE NETWORK POLICY {name}"
             result = self.execute_query(query)
             
@@ -1927,6 +2088,60 @@ $$
             'active_databases': active_databases,
             'average_storage_per_day_gb': average_storage_per_day_gb
         }
+
+    def get_current_network_policy(self) -> str:
+        """Get the currently active network policy for the account"""
+        try:
+            query = "SHOW PARAMETERS LIKE 'NETWORK_POLICY' IN ACCOUNT"
+            result = self.execute_query(query)
+            
+            if result and len(result) > 0:
+                # The result contains parameter info, get the value
+                current_policy = result[0].get('value', '')
+                return current_policy if current_policy else ''
+            
+            return ''
+        except Exception as e:
+            logger.error(f"Error getting current network policy: {e}")
+            return ''
+
+    def enable_network_policy(self, policy_name: str) -> bool:
+        """Enable (attach) a network policy to the account"""
+        try:
+            query = f"ALTER ACCOUNT SET NETWORK_POLICY = '{policy_name}'"
+            self.execute_query(query)
+            logger.info(f"✅ Network policy {policy_name} enabled successfully")
+            return True
+            
+        except Exception as e:
+            error_message = str(e)
+            logger.error(f"❌ Error enabling network policy {policy_name}: {e}")
+            
+            # Check for specific Snowflake errors
+            if "does not exist" in error_message:
+                raise ValueError(f"Network policy '{policy_name}' does not exist.")
+            elif "not authorized" in error_message:
+                raise ValueError(f"Not authorized to enable network policy '{policy_name}'.")
+            else:
+                raise ValueError(f"Failed to enable network policy '{policy_name}': {error_message}")
+
+    def disable_network_policy(self) -> bool:
+        """Disable (unset) the current network policy from the account"""
+        try:
+            query = "ALTER ACCOUNT UNSET NETWORK_POLICY"
+            self.execute_query(query)
+            logger.info(f"✅ Network policy disabled successfully")
+            return True
+            
+        except Exception as e:
+            error_message = str(e)
+            logger.error(f"❌ Error disabling network policy: {e}")
+            
+            # Check for specific Snowflake errors
+            if "not authorized" in error_message:
+                raise ValueError(f"Not authorized to disable network policy.")
+            else:
+                raise ValueError(f"Failed to disable network policy: {error_message}")
 
 # Global database instance
 _db_instance = None

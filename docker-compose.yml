@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  snowflake-container-manager:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # These should be set via .env file or environment variables
+      - SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}
+      - SNOWFLAKE_USER=${SNOWFLAKE_USER}
+      - SNOWFLAKE_PASSWORD=${SNOWFLAKE_PASSWORD}
+      - SNOWFLAKE_PRIVATE_KEY_PATH=${SNOWFLAKE_PRIVATE_KEY_PATH}
+      - SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}
+      - SNOWFLAKE_DATABASE=${SNOWFLAKE_DATABASE}
+      - SNOWFLAKE_SCHEMA=${SNOWFLAKE_SCHEMA}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-here}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+    volumes:
+      # Mount secrets directory if using keypair authentication
+      - ./secrets:/app/backend/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

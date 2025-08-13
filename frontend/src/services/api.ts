@@ -221,13 +221,15 @@ export interface NetworkRuleUpdate {
 export interface NetworkPolicy {
   name: string;
   created_on: string;
-  database_name?: string;
-  schema_name?: string;
   comment?: string;
   entries_in_allowed_ip_list: number;
   entries_in_blocked_ip_list: number;
   entries_in_allowed_network_rules: number;
   entries_in_blocked_network_rules: number;
+  database_name?: string;
+  schema_name?: string;
+  owner?: string;
+  is_active?: boolean; // Whether this policy is currently enabled
 }
 
 export interface NetworkPolicyCreate {
@@ -321,6 +323,15 @@ export interface ComputePool {
   max_nodes: number;
   instance_family: string;
   created_at: string;
+  owner?: string;
+  comment?: string;
+  auto_resume?: string;
+  auto_suspend_secs?: string;
+  num_nodes?: number;
+  active_nodes?: number;
+  idle_nodes?: number;
+  total_uptime?: string;
+  resource_utilization?: string;
 }
 
 export interface CreateTag {
@@ -344,6 +355,12 @@ export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;
   data: T;
+}
+
+export interface NetworkPolicyStatus {
+  current_policy: string;
+  is_enabled: boolean;
+  message: string;
 }
 
 class ApiService {
@@ -544,6 +561,10 @@ class ApiService {
   // Compute Pools
   async getComputePools(): Promise<AxiosResponse<ComputePool[]>> {
     return this.get('/compute-pools');
+  }
+
+  async describeComputePool(poolName: string): Promise<AxiosResponse<{success: boolean, data: any}>> {
+    return this.get(`/compute-pools/${poolName}`);
   }
 
   // Image Repositories and Images
@@ -748,6 +769,18 @@ class ApiService {
 
   async getComputePoolLogs(poolName: string, limit: number = 100): Promise<AxiosResponse<any>> {
     return this.get(`/compute-pools/${poolName}/logs?limit=${limit}`);
+  }
+
+  getNetworkPolicyStatus() {
+    return this.get('/network-policy-status');
+  }
+
+  enableNetworkPolicy(policyName: string) {
+    return this.post(`/network-policies/${policyName}/enable`);
+  }
+
+  disableNetworkPolicy() {
+    return this.post('/network-policies/disable');
   }
 }
 

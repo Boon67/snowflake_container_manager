@@ -168,7 +168,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
         <Col xs={24} sm={12} md={6}>
           <Card
             hoverable
-            onClick={() => onNavigateToTab('parameters')}
+            onClick={() => onNavigateToTab('solutions')}
             style={{
               borderRadius: '8px',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
@@ -187,7 +187,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
         <Col xs={24} sm={12} md={6}>
           <Card
             hoverable
-            onClick={() => onNavigateToTab('tags')}
+            onClick={() => onNavigateToTab('solutions')}
             style={{
               background: '#FFFFFF',
               borderColor: '#DEE2E6',
@@ -232,7 +232,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
         <Col xs={24} sm={12} md={6}>
           <Card
             hoverable
-            onClick={() => onNavigateToTab('parameters')}
+            onClick={() => onNavigateToTab('solutions')}
             style={{
               background: '#FFFFFF',
               borderColor: '#DEE2E6',
@@ -434,7 +434,7 @@ const Overview: React.FC<OverviewProps> = ({ onNavigateToTab, onNavigateToSoluti
                 <strong style={{ color: '#0D4F8C' }}>📋 Create Solution:</strong> Set up new configuration solutions with parameters and API keys
               </div>
               <div 
-                onClick={() => onNavigateToTab('parameters')}
+                onClick={() => onNavigateToTab('solutions')}
                 style={{ 
                   marginBottom: '16px', 
                   padding: '12px',

@@ -35,6 +35,8 @@ import {
   DeleteOutlined,
   SecurityScanOutlined,
   EditOutlined,
+  DownOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { api, ContainerService, ComputePool, ImageRepository, ContainerImage, NetworkRule, NetworkPolicy } from '../services/api.ts';
 import { useTheme } from '../contexts/ThemeContext.tsx';
@@ -62,7 +64,8 @@ const ContainerServiceManager: React.FC = () => {
   
   // Expandable repositories state
   const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(new Set());
-  const [repositoryImages, setRepositoryImages] = useState<{[key: string]: ContainerImage[]}>({})
+  const [repositoryImages, setRepositoryImages] = useState<{[key: string]: ContainerImage[]}>({});
+  const [loadingRepositoryImages, setLoadingRepositoryImages] = useState<Set<string>>(new Set());
   
   // Logs modal state
   const [logsModalVisible, setLogsModalVisible] = useState(false);
@@ -482,15 +485,26 @@ const ContainerServiceManager: React.FC = () => {
       
       // Load images for this repository if not already loaded
       if (!repositoryImages[repoKey]) {
+        // Set loading state
+        setLoadingRepositoryImages(prev => new Set([...prev, repoKey]));
+        
         try {
           const response = await api.getRepositoryImages(record.name, record.database, record.schema);
           setRepositoryImages(prev => ({
             ...prev,
             [repoKey]: response.data
           }));
+          message.success(`Loaded ${response.data.length} images from repository ${record.name}`);
         } catch (error) {
           message.error(`Failed to load images for repository ${record.name}`);
           console.error('Error loading repository images:', error);
+        } finally {
+          // Remove loading state
+          setLoadingRepositoryImages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(repoKey);
+            return newSet;
+          });
         }
       }
     } else {
@@ -506,6 +520,15 @@ const ContainerServiceManager: React.FC = () => {
   const getRepositoryImagesForDisplay = (record: ImageRepository) => {
     const repoKey = `${record.database}.${record.schema}.${record.name}`;
     return repositoryImages[repoKey] || [];
+  };
+
+  // Calculate image count for a repository from all available images
+  const getRepositoryImageCount = (record: ImageRepository) => {
+    return images.filter(image => 
+      image.repository_database === record.database &&
+      image.repository_schema === record.schema &&
+      image.repository_name === record.name
+    ).length;
   };
 
   // Filter network rules based on search text
@@ -908,9 +931,17 @@ const ContainerServiceManager: React.FC = () => {
       render: (state: string) => getPoolStateBadge(state),
     },
     {
-      title: 'Nodes',
+      title: 'Owner',
+      dataIndex: 'owner',
+      key: 'owner',
+      width: 120,
+      sorter: (a: ComputePool, b: ComputePool) => (a.owner || '').localeCompare(b.owner || ''),
+      render: (owner: string) => owner || <Text type="secondary">-</Text>,
+    },
+    {
+      title: 'Nodes (Min-Max)',
       key: 'nodes',
-      width: 100,
+      width: 120,
       sorter: (a: ComputePool, b: ComputePool) => a.min_nodes - b.min_nodes,
       render: (_, record: ComputePool) => (
         <AntTag color="purple">
@@ -919,11 +950,62 @@ const ContainerServiceManager: React.FC = () => {
       ),
     },
     {
+      title: 'Active Nodes',
+      key: 'active_nodes',
+      width: 100,
+      sorter: (a: ComputePool, b: ComputePool) => (a.active_nodes || 0) - (b.active_nodes || 0),
+      render: (_, record: ComputePool) => {
+        const activeNodes = record.active_nodes || 0;
+        const totalNodes = record.num_nodes || 0;
+        return (
+          <Space direction="vertical" size={0}>
+            <AntTag color={activeNodes > 0 ? 'green' : 'default'}>
+              {activeNodes} active
+            </AntTag>
+            {totalNodes > 0 && (
+              <Text type="secondary" style={{ fontSize: '11px' }}>
+                {totalNodes} total
+              </Text>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
       title: 'Instance Family',
       dataIndex: 'instance_family',
       key: 'instance_family',
-      width: 150,
+      width: 130,
       sorter: (a: ComputePool, b: ComputePool) => a.instance_family.localeCompare(b.instance_family),
+      render: (family: string) => (
+        <AntTag color="blue" style={{ fontSize: '11px' }}>
+          {family}
+        </AntTag>
+      ),
+    },
+    {
+      title: 'Auto Resume',
+      dataIndex: 'auto_resume',
+      key: 'auto_resume',
+      width: 100,
+      sorter: (a: ComputePool, b: ComputePool) => (a.auto_resume || '').localeCompare(b.auto_resume || ''),
+      render: (autoResume: string) => {
+        if (autoResume === 'TRUE' || autoResume === 'true') {
+          return <AntTag color="green">Enabled</AntTag>;
+        } else if (autoResume === 'FALSE' || autoResume === 'false') {
+          return <AntTag color="orange">Disabled</AntTag>;
+        }
+        return <Text type="secondary">-</Text>;
+      },
+    },
+    {
+      title: 'Comment',
+      dataIndex: 'comment',
+      key: 'comment',
+      width: 150,
+      ellipsis: true,
+      sorter: (a: ComputePool, b: ComputePool) => (a.comment || '').localeCompare(b.comment || ''),
+      render: (comment: string) => comment || <Text type="secondary">No comment</Text>,
     },
     {
       title: 'Created',
@@ -931,7 +1013,11 @@ const ContainerServiceManager: React.FC = () => {
       key: 'created_at',
       width: 120,
       sorter: (a: ComputePool, b: ComputePool) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      render: (date: string) => new Date(date).toLocaleDateString(),
+      render: (date: string) => (
+        <Tooltip title={new Date(date).toLocaleString()}>
+          {new Date(date).toLocaleDateString()}
+        </Tooltip>
+      ),
     },
     {
       title: 'Actions',
@@ -1009,14 +1095,29 @@ const ContainerServiceManager: React.FC = () => {
       dataIndex: 'name',
       key: 'name',
       sorter: (a: ImageRepository, b: ImageRepository) => a.name.localeCompare(b.name),
-      render: (text: string, record: ImageRepository) => (
-        <Space direction="vertical" size={0}>
-          <Text strong style={{ color: '#1F86C9' }}>{text}</Text>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            {record.database}.{record.schema}
-          </Text>
-        </Space>
-      ),
+      render: (text: string, record: ImageRepository) => {
+        const repoKey = `${record.database}.${record.schema}.${record.name}`;
+        const isLoading = loadingRepositoryImages.has(repoKey);
+        const imageCount = getRepositoryImageCount(record);
+        
+        return (
+          <Space direction="vertical" size={0}>
+            <Space size={8}>
+              <Text strong style={{ color: '#1F86C9' }}>{text}</Text>
+              {isLoading ? (
+                <AntTag color="processing" style={{ fontSize: '10px' }}>Loading...</AntTag>
+              ) : (
+                <AntTag color={imageCount > 0 ? 'success' : 'default'} style={{ fontSize: '10px' }}>
+                  {imageCount} {imageCount === 1 ? 'image' : 'images'}
+                </AntTag>
+              )}
+            </Space>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              {record.database}.{record.schema}
+            </Text>
+          </Space>
+        );
+      },
     },
     {
       title: 'Database',
@@ -1094,77 +1195,55 @@ const ContainerServiceManager: React.FC = () => {
     {
       title: 'Image Details',
       key: 'image_details',
+      width: 200,
       render: (_, record: ContainerImage) => (
-        <Space direction="vertical" size={0}>
-          <Text strong style={{ color: '#1F86C9' }}>{record.image_name}</Text>
-          <AntTag color="blue">{record.tag}</AntTag>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            Repository: {record.repository_name}
-          </Text>
+        <Space direction="vertical" size={2}>
+          <Text strong style={{ color: '#1F86C9', fontSize: '13px' }}>{record.image_name}</Text>
+          <AntTag color="blue" style={{ fontSize: '10px' }}>{record.tag}</AntTag>
         </Space>
       ),
     },
     {
-      title: 'Size',
-      dataIndex: 'size_bytes',
-      key: 'size_bytes',
-      width: 100,
-      sorter: (a: ContainerImage, b: ContainerImage) => a.size_bytes - b.size_bytes,
-      render: (sizeBytes: number) => {
-        const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(1);
-        return `${sizeMB} MB`;
-      },
-    },
-    {
-      title: 'Architecture',
-      dataIndex: 'architecture',
-      key: 'architecture',
-      width: 100,
-      sorter: (a: ContainerImage, b: ContainerImage) => a.architecture.localeCompare(b.architecture),
-    },
-    {
-      title: 'OS',
-      dataIndex: 'os',
-      key: 'os',
-      width: 80,
-      sorter: (a: ContainerImage, b: ContainerImage) => a.os.localeCompare(b.os),
+      title: 'Repository',
+      key: 'repository_path',
+      width: 250,
+      render: (_, record: ContainerImage) => (
+        <Text type="secondary" style={{ fontSize: '11px', fontFamily: 'monospace' }}>
+          {record.repository_database}.{record.repository_schema}.{record.repository_name}
+        </Text>
+      ),
+      sorter: (a: ContainerImage, b: ContainerImage) => 
+        `${a.repository_database}.${a.repository_schema}.${a.repository_name}`.localeCompare(
+          `${b.repository_database}.${b.repository_schema}.${b.repository_name}`
+        ),
     },
     {
       title: 'Digest',
       dataIndex: 'digest',
       key: 'digest',
-      width: 150,
+      width: 130,
       render: (digest: string) => (
         <Tooltip title={digest}>
-          <Text ellipsis style={{ maxWidth: 130 }}>
-            {digest.substring(0, 20)}...
+          <Text ellipsis style={{ maxWidth: 110, fontFamily: 'monospace', fontSize: '11px' }}>
+            {digest ? digest.substring(0, 16) + '...' : 'N/A'}
           </Text>
         </Tooltip>
       ),
     },
     {
-      title: 'Uploaded',
-      dataIndex: 'uploaded_at',
-      key: 'uploaded_at',
-      width: 120,
-      sorter: (a: ContainerImage, b: ContainerImage) => new Date(a.uploaded_at).getTime() - new Date(b.uploaded_at).getTime(),
-      render: (date: string) => new Date(date).toLocaleDateString(),
-    },
-    {
       title: 'Actions',
       key: 'actions',
-      width: 120,
+      width: 90,
       render: (_, record: ContainerImage) => {
         const imagePath = `/${record.repository_database}/${record.repository_schema}/${record.repository_name}/${record.image_name}:${record.tag}`;
         return (
           <Tooltip title="Deploy container with this image">
             <Button
-              type="text"
+              type="primary"
+              size="small"
               icon={<PlusOutlined />}
-              style={{ color: '#1F86C9' }}
               onClick={() => {
                 showCreateServiceModal();
-                // Small delay to ensure modal is open before setting image
                 setTimeout(() => handleImageSelection(imagePath), 100);
               }}
             >
@@ -1363,8 +1442,10 @@ const ContainerServiceManager: React.FC = () => {
                       dataSource={filteredServices}
                       loading={loading}
                       rowKey="name"
+                      size="small"
                       pagination={{
-                        pageSize: 10,
+                        pageSize: 15,
+                        size: 'small',
                         showSizeChanger: true,
                         showQuickJumper: true,
                         showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} services`,
@@ -1372,11 +1453,23 @@ const ContainerServiceManager: React.FC = () => {
                     />
                   )}
                 </Card>
-
+              </div>
+            ),
+          },
+          {
+            key: 'pools',
+            label: (
+              <span>
+                <CloudServerOutlined />
+                Compute Pools
+              </span>
+            ),
+            children: (
+              <div>
                 <Card>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <Title level={3} style={{ margin: 0 }}>
-                      <DatabaseOutlined style={{ marginRight: 8, color: '#52c41a' }} />
+                      <CloudServerOutlined style={{ marginRight: 8, color: '#52c41a' }} />
                       Compute Pools
                     </Title>
                     <Button
@@ -1412,12 +1505,17 @@ const ContainerServiceManager: React.FC = () => {
                       dataSource={filteredPools}
                       loading={loading}
                       rowKey="name"
+                      size="small"
+                      scroll={{ x: 1400 }}
                       pagination={{
-                        pageSize: 10,
+                        pageSize: 15,
+                        size: 'small',
                         showSizeChanger: true,
                         showQuickJumper: true,
                         showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} pools`,
+                        pageSizeOptions: ['10', '15', '25', '50'],
                       }}
+                      sortDirections={['ascend', 'descend']}
                     />
                   )}
                 </Card>
@@ -1471,19 +1569,32 @@ const ContainerServiceManager: React.FC = () => {
                     columns={repositoryColumns}
                     dataSource={filteredRepositories}
                     loading={loading}
+                    size="small"
                     rowKey={(record) => `${record.database}.${record.schema}.${record.name}`}
                     expandable={{
                       expandedRowRender: (record: ImageRepository) => {
                         const repoImages = getRepositoryImagesForDisplay(record);
                         const repoKey = `${record.database}.${record.schema}.${record.name}`;
                         const isExpanded = expandedRepositories.has(repoKey);
+                        const isLoading = loadingRepositoryImages.has(repoKey);
+                        
+                        if (isLoading) {
+                          return (
+                            <div style={{ padding: '24px', textAlign: 'center' }}>
+                              <Spin size="large" />
+                              <div style={{ marginTop: 16 }}>
+                                <Text>Loading images from repository {record.name}...</Text>
+                              </div>
+                            </div>
+                          );
+                        }
                         
                         if (!isExpanded || repoImages.length === 0) {
                           return (
                             <div style={{ padding: '16px' }}>
                               <Alert
                                 message="No Images Found"
-                                description={`No container images found in repository ${record.name}`}
+                                description={`No container images found in repository ${record.name}. This repository may be empty or the images may not be accessible.`}
                                 type="info"
                                 showIcon
                               />
@@ -1492,90 +1603,107 @@ const ContainerServiceManager: React.FC = () => {
                         }
                         
                         return (
-                          <div style={{ padding: '16px' }}>
-                            <Title level={5} style={{ marginBottom: 16 }}>
-                              Images in {record.name}
-                            </Title>
+                          <div style={{ padding: '16px', backgroundColor: isDarkMode ? '#001529' : '#fafafa', borderRadius: '6px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                              <Title level={5} style={{ margin: 0 }}>
+                                <CloudServerOutlined style={{ marginRight: 8, color: '#13c2c2' }} />
+                                Images in {record.name} ({repoImages.length} {repoImages.length === 1 ? 'image' : 'images'})
+                              </Title>
+                              <AntTag color="processing">
+                                Repository: {record.database}.{record.schema}.{record.name}
+                              </AntTag>
+                            </div>
                             <Table
                               columns={[
                                 {
-                                  title: 'Image',
+                                  title: 'Image Details',
+                                  width: 200,
                                   render: (_, image: ContainerImage) => (
-                                    <Space direction="vertical" size={0}>
-                                      <Text strong style={{ color: '#1F86C9' }}>{image.image_name}</Text>
-                                      <AntTag color="blue">{image.tag}</AntTag>
+                                    <Space direction="vertical" size={2}>
+                                      <Text strong style={{ color: '#1F86C9', fontSize: '13px' }}>
+                                        {image.image_name}
+                                      </Text>
+                                      <AntTag color="blue" style={{ fontSize: '10px' }}>
+                                        {image.tag}
+                                      </AntTag>
                                     </Space>
                                   ),
                                 },
                                 {
-                                  title: 'Size',
-                                  dataIndex: 'size_bytes',
-                                  width: 100,
-                                  render: (sizeBytes: number) => {
-                                    const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(1);
-                                    return `${sizeMB} MB`;
-                                  },
-                                },
-                                {
-                                  title: 'Architecture',
-                                  dataIndex: 'architecture',
-                                  width: 100,
-                                },
-                                {
-                                  title: 'OS',
-                                  dataIndex: 'os',
-                                  width: 80,
-                                },
-                                {
-                                  title: 'Uploaded',
-                                  dataIndex: 'uploaded_at',
-                                  width: 120,
-                                  render: (date: string) => new Date(date).toLocaleDateString(),
+                                  title: 'Digest',
+                                  dataIndex: 'digest',
+                                  width: 140,
+                                  render: (digest: string) => (
+                                    <Tooltip title={digest}>
+                                      <Text ellipsis style={{ maxWidth: 120, fontFamily: 'monospace', fontSize: '11px' }}>
+                                        {digest ? digest.substring(0, 16) + '...' : 'N/A'}
+                                      </Text>
+                                    </Tooltip>
+                                  ),
                                 },
                                 {
                                   title: 'Actions',
-                                  width: 120,
+                                  width: 100,
                                   render: (_, image: ContainerImage) => {
                                     const imagePath = `/${image.repository_database}/${image.repository_schema}/${image.repository_name}/${image.image_name}:${image.tag}`;
                                     return (
-                                      <Tooltip title="Deploy container with this image">
-                                        <Button
-                                          type="text"
-                                          icon={<PlusOutlined />}
-                                          style={{ color: '#1F86C9' }}
-                                          onClick={() => {
-                                            showCreateServiceModal();
-                                            setTimeout(() => handleImageSelection(imagePath), 100);
-                                          }}
-                                        >
-                                          Deploy
-                                        </Button>
-                                      </Tooltip>
+                                      <Space>
+                                        <Tooltip title="Deploy container service with this image">
+                                          <Button
+                                            type="primary"
+                                            size="small"
+                                            icon={<PlusOutlined />}
+                                            onClick={() => {
+                                              showCreateServiceModal();
+                                              setTimeout(() => handleImageSelection(imagePath), 100);
+                                            }}
+                                          >
+                                            Deploy
+                                          </Button>
+                                        </Tooltip>
+                                      </Space>
                                     );
                                   },
                                 },
                               ]}
                               dataSource={repoImages}
-                              pagination={false}
+                              pagination={repoImages.length > 5 ? { pageSize: 5, size: 'small' } : false}
                               size="small"
                               rowKey={(image) => `${image.image_name}-${image.tag}`}
+                              style={{ 
+                                backgroundColor: isDarkMode ? '#141414' : '#ffffff',
+                                borderRadius: '4px'
+                              }}
                             />
                           </div>
                         );
                       },
                       onExpand: handleRepositoryExpand,
-                      expandIcon: ({ expanded, onExpand, record }) => (
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={expanded ? <DatabaseOutlined /> : <DatabaseOutlined />}
-                          onClick={(e) => onExpand(record, e)}
-                          style={{ color: expanded ? '#1890ff' : '#666' }}
-                        />
-                      ),
+                      expandIcon: ({ expanded, onExpand, record }) => {
+                        const repoKey = `${record.database}.${record.schema}.${record.name}`;
+                        const isLoading = loadingRepositoryImages.has(repoKey);
+                        
+                        return (
+                          <Tooltip title={expanded ? "Hide images" : "Show images in this repository"}>
+                            <Button
+                              type="text"
+                              size="small"
+                              loading={isLoading}
+                              icon={!isLoading && (expanded ? <DownOutlined /> : <RightOutlined />)}
+                              onClick={(e) => onExpand(record, e)}
+                              style={{ 
+                                color: expanded ? '#1890ff' : '#666',
+                                display: 'flex',
+                                alignItems: 'center'
+                              }}
+                            />
+                          </Tooltip>
+                        );
+                      },
                     }}
                     pagination={{
-                      pageSize: 10,
+                      pageSize: 15,
+                      size: 'small',
                       showSizeChanger: true,
                       showQuickJumper: true,
                       showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} repositories`,
@@ -1590,7 +1718,7 @@ const ContainerServiceManager: React.FC = () => {
             label: (
               <span>
                 <CloudServerOutlined />
-                Container Images
+                Images
               </span>
             ),
             children: (
@@ -1599,7 +1727,7 @@ const ContainerServiceManager: React.FC = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <Title level={3} style={{ margin: 0 }}>
                       <CloudServerOutlined style={{ marginRight: 8, color: '#13c2c2' }} />
-                      Container Images
+                      Images
                     </Title>
                   </div>
 
@@ -1624,7 +1752,7 @@ const ContainerServiceManager: React.FC = () => {
 
                   {images.length === 0 && !loading ? (
                     <Alert
-                      message="No Container Images Found"
+                      message="No Images Found"
                       description="No container images are currently available in your image repositories."
                       type="info"
                       showIcon
@@ -1634,295 +1762,17 @@ const ContainerServiceManager: React.FC = () => {
                       columns={imageColumns}
                       dataSource={filteredImages}
                       loading={loading}
+                      size="small"
                       rowKey={(record) => `${record.repository_name}-${record.image_name}-${record.tag}`}
                       pagination={{
-                        pageSize: 10,
+                        pageSize: 15,
+                        size: 'small',
                         showSizeChanger: true,
                         showQuickJumper: true,
                         showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} images`,
                       }}
                     />
                   )}
-                </Card>
-              </div>
-            ),
-          },
-          {
-            key: 'network',
-            label: (
-              <span>
-                <SecurityScanOutlined />
-                Network Security
-              </span>
-            ),
-            children: (
-              <div>
-                <Card style={{ marginBottom: 24 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Title level={3} style={{ margin: 0 }}>
-                      <SecurityScanOutlined style={{ marginRight: 8, color: '#fa541c' }} />
-                      Network Rules
-                    </Title>
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={() => setCreateRuleModalVisible(true)}
-                    >
-                      Create Network Rule
-                    </Button>
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <Input
-                      placeholder="Search network rules by name, type, mode..."
-                      prefix={<SearchOutlined />}
-                      value={networkRuleSearchText}
-                      onChange={(e) => handleNetworkRuleSearch(e.target.value)}
-                      allowClear
-                      style={{ maxWidth: 450 }}
-                    />
-                  </div>
-
-                  <Alert
-                    message="Network Rules Information"
-                    description="Network rules define network identifiers (IP addresses, VPC endpoints, domains) that can be referenced by network policies and other security features."
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                  />
-
-                  <Table
-                    columns={[
-                      {
-                        title: 'Rule Name',
-                        dataIndex: 'name',
-                        key: 'name',
-                        render: (text: string, record: NetworkRule) => (
-                          <Space direction="vertical" size={0}>
-                            <Text strong style={{ color: '#1F86C9' }}>{text}</Text>
-                            <Text type="secondary" style={{ fontSize: '12px' }}>
-                              {record.database_name}.{record.schema_name}
-                            </Text>
-                          </Space>
-                        ),
-                      },
-                      {
-                        title: 'Type',
-                        dataIndex: 'type',
-                        key: 'type',
-                        width: 120,
-                        render: (type: string) => <AntTag color="blue">{type}</AntTag>,
-                      },
-                      {
-                        title: 'Mode',
-                        dataIndex: 'mode',
-                        key: 'mode',
-                        width: 120,
-                        render: (mode: string) => <AntTag color="green">{mode}</AntTag>,
-                      },
-                      {
-                        title: 'Entries',
-                        dataIndex: 'entries_in_valuelist',
-                        key: 'entries_in_valuelist',
-                        width: 100,
-                      },
-                      {
-                        title: 'Owner',
-                        dataIndex: 'owner',
-                        key: 'owner',
-                        width: 120,
-                      },
-                      {
-                        title: 'Created',
-                        dataIndex: 'created_on',
-                        key: 'created_on',
-                        width: 120,
-                        render: (date: string) => new Date(date).toLocaleDateString(),
-                      },
-                      {
-                        title: 'Actions',
-                        key: 'actions',
-                        width: 180,
-                        render: (_, record: NetworkRule) => (
-                          <Space>
-                            <Tooltip title="View Details">
-                              <Button
-                                type="text"
-                                icon={<EyeOutlined />}
-                                onClick={() => handleViewRuleDetails(record.name)}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Edit Rule">
-                              <Button
-                                type="text"
-                                icon={<EditOutlined />}
-                                onClick={() => handleEditRule(record)}
-                              />
-                            </Tooltip>
-                            <Popconfirm
-                              title="Delete Network Rule"
-                              description="Are you sure you want to delete this network rule?"
-                              onConfirm={() => handleDeleteNetworkRule(record.name)}
-                              okText="Yes"
-                              cancelText="No"
-                              okButtonProps={{ danger: true }}
-                            >
-                              <Tooltip title="Delete Rule">
-                                <Button
-                                  type="text"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  loading={operationLoading === record.name}
-                                />
-                              </Tooltip>
-                            </Popconfirm>
-                          </Space>
-                        ),
-                      },
-                    ]}
-                    dataSource={filteredNetworkRules}
-                    loading={loading}
-                    rowKey="name"
-                    pagination={{
-                      pageSize: 10,
-                      showSizeChanger: true,
-                      showQuickJumper: true,
-                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} rules`,
-                    }}
-                  />
-                </Card>
-
-                <Card>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Title level={3} style={{ margin: 0 }}>
-                      <SecurityScanOutlined style={{ marginRight: 8, color: '#722ed1' }} />
-                      Network Policies
-                    </Title>
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={() => setCreatePolicyModalVisible(true)}
-                    >
-                      Create Network Policy
-                    </Button>
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <Input
-                      placeholder="Search network policies by name..."
-                      prefix={<SearchOutlined />}
-                      value={networkPolicySearchText}
-                      onChange={(e) => handleNetworkPolicySearch(e.target.value)}
-                      allowClear
-                      style={{ maxWidth: 450 }}
-                    />
-                  </div>
-
-                  <Alert
-                    message="Network Policies Information"
-                    description="Network policies control inbound access to Snowflake by referencing network rules and IP address lists."
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                  />
-
-                  <Table
-                    columns={[
-                      {
-                        title: 'Policy Name',
-                        dataIndex: 'name',
-                        key: 'name',
-                        render: (text: string, record: NetworkPolicy) => (
-                          <Space direction="vertical" size={0}>
-                            <Text strong style={{ color: '#1F86C9' }}>{text}</Text>
-                            <Text type="secondary" style={{ fontSize: '12px' }}>
-                              {record.database_name}.{record.schema_name}
-                            </Text>
-                          </Space>
-                        ),
-                      },
-                      {
-                        title: 'Allowed IPs',
-                        dataIndex: 'entries_in_allowed_ip_list',
-                        key: 'entries_in_allowed_ip_list',
-                        width: 120,
-                      },
-                      {
-                        title: 'Blocked IPs',
-                        dataIndex: 'entries_in_blocked_ip_list',
-                        key: 'entries_in_blocked_ip_list',
-                        width: 120,
-                      },
-                      {
-                        title: 'Allowed Rules',
-                        dataIndex: 'entries_in_allowed_network_rules',
-                        key: 'entries_in_allowed_network_rules',
-                        width: 120,
-                      },
-                      {
-                        title: 'Blocked Rules',
-                        dataIndex: 'entries_in_blocked_network_rules',
-                        key: 'entries_in_blocked_network_rules',
-                        width: 120,
-                      },
-                      {
-                        title: 'Created',
-                        dataIndex: 'created_on',
-                        key: 'created_on',
-                        width: 120,
-                        render: (date: string) => new Date(date).toLocaleDateString(),
-                      },
-                      {
-                        title: 'Actions',
-                        key: 'actions',
-                        width: 180,
-                        render: (_, record: NetworkPolicy) => (
-                          <Space>
-                            <Tooltip title="View Details">
-                              <Button
-                                type="text"
-                                icon={<EyeOutlined />}
-                                onClick={() => handleViewPolicyDetails(record.name)}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Edit Policy">
-                              <Button
-                                type="text"
-                                icon={<EditOutlined />}
-                                onClick={() => handleEditPolicy(record)}
-                              />
-                            </Tooltip>
-                            <Popconfirm
-                              title="Delete Network Policy"
-                              description="Are you sure you want to delete this network policy?"
-                              onConfirm={() => handleDeleteNetworkPolicy(record.name)}
-                              okText="Yes"
-                              cancelText="No"
-                              okButtonProps={{ danger: true }}
-                            >
-                              <Tooltip title="Delete Policy">
-                                <Button
-                                  type="text"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  loading={operationLoading === record.name}
-                                />
-                              </Tooltip>
-                            </Popconfirm>
-                          </Space>
-                        ),
-                      },
-                    ]}
-                    dataSource={filteredNetworkPolicies}
-                    loading={loading}
-                    rowKey="name"
-                    pagination={{
-                      pageSize: 10,
-                      showSizeChanger: true,
-                      showQuickJumper: true,
-                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} policies`,
-                    }}
-                  />
                 </Card>
               </div>
             ),
@@ -2102,7 +1952,7 @@ const ContainerServiceManager: React.FC = () => {
       >
         <Alert
           message="Quick Tip"
-          description="You can also deploy a container directly by clicking the 'Deploy' button next to any image in the Container Images section below."
+          description="You can also deploy a container directly by clicking the 'Deploy' button next to any image in the Images section below."
           type="info"
           showIcon
           style={{ marginBottom: 16 }}

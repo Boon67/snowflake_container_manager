@@ -1686,6 +1686,23 @@ async def delete_compute_pool(
         logger.error(f"Error deleting compute pool: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete compute pool: {str(e)}")
 
+@app.get("/api/compute-pools/{pool_name}")
+async def describe_compute_pool(
+    pool_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get detailed information about a compute pool"""
+    db = get_database()
+    try:
+        pool_details = db.describe_compute_pool(pool_name)
+        if not pool_details:
+            raise HTTPException(status_code=404, detail=f"Compute pool {pool_name} not found or no details available")
+        
+        return {"success": True, "data": pool_details}
+    except Exception as e:
+        logger.error(f"Error describing compute pool: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to describe compute pool: {str(e)}")
+
 @app.get("/api/compute-pools/{pool_name}/logs")
 async def get_compute_pool_logs(
     pool_name: str,
@@ -1845,7 +1862,12 @@ async def create_network_rule(
             raise HTTPException(status_code=500, detail="Failed to create network rule")
         
         return models.APIResponse(message=f"Network rule {rule_data.name} created successfully")
+    except ValueError as e:
+        # Client errors (permissions, validation, etc.)
+        logger.warning(f"Client error creating network rule: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Server errors
         logger.error(f"Error creating network rule: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create network rule: {str(e)}")
 
@@ -1884,7 +1906,12 @@ async def delete_network_rule(
             raise HTTPException(status_code=500, detail="Failed to delete network rule")
         
         return models.APIResponse(message=f"Network rule {rule_name} deleted successfully")
+    except ValueError as e:
+        # Client errors (rule doesn't exist, not authorized, etc.)
+        logger.warning(f"Client error deleting network rule: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Server errors
         logger.error(f"Error deleting network rule: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete network rule: {str(e)}")
 
@@ -1936,7 +1963,12 @@ async def create_network_policy(
             raise HTTPException(status_code=500, detail="Failed to create network policy")
         
         return models.APIResponse(message=f"Network policy {policy_data.name} created successfully")
+    except ValueError as e:
+        # Client errors (permissions, validation, etc.)
+        logger.warning(f"Client error creating network policy: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Server errors
         logger.error(f"Error creating network policy: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create network policy: {str(e)}")
 
@@ -1978,7 +2010,12 @@ async def delete_network_policy(
             raise HTTPException(status_code=500, detail="Failed to delete network policy")
         
         return models.APIResponse(message=f"Network policy {policy_name} deleted successfully")
+    except ValueError as e:
+        # Client errors (policy attached, doesn't exist, etc.)
+        logger.warning(f"Client error deleting network policy: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Server errors
         logger.error(f"Error deleting network policy: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete network policy: {str(e)}")
 
@@ -2021,6 +2058,104 @@ async def debug_policy_details(policy_name: str):
         }
     except Exception as e:
         return {"error": f"Failed to get policy details: {str(e)}"}
+
+@app.get("/api/network-policy-help")
+async def network_policy_help():
+    """Help endpoint explaining network policy deletion restrictions"""
+    return {
+        "title": "Network Policy Deletion Guidelines",
+        "issue": "Cannot delete network policies that are currently attached to the account",
+        "explanation": "Snowflake prevents deletion of network policies that are actively being used by the account for security reasons.",
+        "solution_steps": [
+            "1. Check if the policy is attached to the account using: SHOW PARAMETERS LIKE 'NETWORK_POLICY' IN ACCOUNT",
+            "2. If attached, unset it first using: ALTER ACCOUNT UNSET NETWORK_POLICY",  
+            "3. Then you can delete the policy using: DROP NETWORK POLICY <policy_name>",
+            "4. Alternatively, create a new policy and set it before removing the old one"
+        ],
+        "sql_examples": {
+            "check_current_policy": "SHOW PARAMETERS LIKE 'NETWORK_POLICY' IN ACCOUNT;",
+            "unset_policy": "ALTER ACCOUNT UNSET NETWORK_POLICY;",
+            "delete_policy": "DROP NETWORK POLICY ALLOW_EXTERNAL_ACCESS;"
+        },
+        "note": "This is a Snowflake security feature to prevent accidental removal of active network security policies."
+    }
+
+
+
+@app.get("/api/network-policy-status")
+async def get_network_policy_status(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Get the currently active network policy"""
+    db = get_database()
+    try:
+        current_policy = db.get_current_network_policy()
+        return {
+            "current_policy": current_policy,
+            "is_enabled": bool(current_policy),
+            "message": f"Current network policy: {current_policy}" if current_policy else "No network policy currently enabled"
+        }
+    except Exception as e:
+        logger.error(f"Error getting network policy status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get network policy status: {str(e)}")
+
+@app.post("/api/network-policies/{policy_name}/enable")
+async def enable_network_policy(
+    policy_name: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Enable (attach) a network policy to the account"""
+    db = get_database()
+    try:
+        success = db.enable_network_policy(policy_name)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to enable network policy")
+        
+        return models.APIResponse(message=f"Network policy {policy_name} enabled successfully")
+    except ValueError as e:
+        # Client errors (policy doesn't exist, not authorized, etc.)
+        logger.warning(f"Client error enabling network policy: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Server errors
+        logger.error(f"Error enabling network policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable network policy: {str(e)}")
+
+@app.post("/api/network-policies/disable")
+async def disable_network_policy(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Disable (unset) the current network policy from the account"""
+    db = get_database()
+    try:
+        success = db.disable_network_policy()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to disable network policy")
+        
+        return models.APIResponse(message="Network policy disabled successfully")
+    except ValueError as e:
+        # Client errors (not authorized, etc.)
+        logger.warning(f"Client error disabling network policy: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Server errors
+        logger.error(f"Error disabling network policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to disable network policy: {str(e)}")
+
+@app.get("/api/debug/network-policy-status")
+async def debug_network_policy_status():
+    """Debug endpoint to test network policy status without authentication"""
+    db = get_database()
+    try:
+        current_policy = db.get_current_network_policy()
+        return {
+            "current_policy": current_policy,
+            "is_enabled": bool(current_policy),
+            "message": f"Current network policy: {current_policy}" if current_policy else "No network policy currently enabled"
+        }
+    except Exception as e:
+        logger.error(f"Error getting network policy status: {e}")
+        return {"error": f"Failed to get network policy status: {str(e)}"}
 
 # --- Analytics Endpoints ---
 @app.post("/api/analytics/credit-usage", response_model=List[models.CreditUsage])

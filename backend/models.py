@@ -214,6 +214,15 @@ class ComputePool(BaseModel):
     max_nodes: int
     instance_family: str
     created_at: str
+    owner: Optional[str] = None
+    comment: Optional[str] = None
+    auto_resume: Optional[str] = None
+    auto_suspend_secs: Optional[str] = None
+    num_nodes: Optional[int] = None
+    active_nodes: Optional[int] = None
+    idle_nodes: Optional[int] = None
+    total_uptime: Optional[str] = None
+    resource_utilization: Optional[str] = None
     
     class Config:
         from_attributes = True

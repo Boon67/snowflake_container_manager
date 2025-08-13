@@ -1,0 +1,64 @@
+# Git
+.git
+.gitignore
+*.md
+README.md
+docs/
+
+# Node modules (will be rebuilt in container)
+frontend/node_modules
+frontend/build
+
+# Python
+backend/.venv
+backend/__pycache__
+backend/*.pyc
+backend/.pytest_cache
+backend/test_*
+backend/pytest.ini
+backend/TEST_README.md
+backend/test_requirements.txt
+
+# Environment and secrets
+#backend/.env
+#backend/.env.*
+#secrets/
+#backend/secrets/
+#backend/token.txt
+
+# Development files
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Scripts (development only)
+setup.sh
+start.sh
+dev.sh
+
+# Testing
+test_*
+*_test.py
+__pycache__/
+
+# Slack agent (not needed for main app)
+slack_agent/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# IDE
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp

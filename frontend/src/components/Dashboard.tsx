@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout, Menu, Button, Typography, Space, Avatar, Tabs, Switch, Tooltip } from 'antd';
 import { 
   DashboardOutlined, 
@@ -11,12 +11,14 @@ import {
   SunOutlined,
   MoonOutlined,
   BarChartOutlined,
+  SecurityScanOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import Overview from './Overview.tsx';
 import SolutionManager from './SolutionManager.tsx';
 import ContainerServiceManager from './ContainerServiceManager.tsx';
+import NetworkManager from './NetworkManager.tsx';
 import UserManager from './UserManager.tsx';
 import Analytics from './Analytics.tsx';
 
@@ -26,10 +28,32 @@ const { TabPane } = Tabs;
 
 const Dashboard: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
+  
+  // Initialize activeTab from URL hash or default to 'overview'
+  const getInitialTab = () => {
+    const hash = window.location.hash.slice(1); // Remove the '#' character
+    const validTabs = ['overview', 'solutions', 'analytics', 'container-services', 'network', 'users'];
+    return validTabs.includes(hash) ? hash : 'overview';
+  };
+  
+  const [activeTab, setActiveTab] = useState(getInitialTab());
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null);
   const { user, logout } = useAuth();
   const { isDarkMode, toggleTheme } = useTheme();
+
+  // Listen for hash changes (e.g., browser back/forward buttons)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const newTab = getInitialTab();
+      setActiveTab(newTab);
+      if (newTab !== 'solutions') {
+        setSelectedSolutionId(null);
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   // Dynamic colors for dark mode compatibility
   const headerBg = isDarkMode ? undefined : '#FFFFFF';
@@ -43,10 +67,28 @@ const Dashboard: React.FC = () => {
   const handleNavigateToSolution = (solutionId: string) => {
     setSelectedSolutionId(solutionId);
     setActiveTab('solutions');
+    
+    // Update URL hash to persist tab across refreshes
+    window.location.hash = 'solutions';
   };
 
   const handleTabChange = (tabKey: string) => {
     setActiveTab(tabKey);
+    
+    // Update URL hash to persist tab across refreshes
+    window.location.hash = tabKey;
+    
+    if (tabKey !== 'solutions') {
+      setSelectedSolutionId(null);
+    }
+  };
+
+  const handleNavigateToTab = (tabKey: string) => {
+    setActiveTab(tabKey);
+    
+    // Update URL hash to persist tab across refreshes
+    window.location.hash = tabKey;
+    
     if (tabKey !== 'solutions') {
       setSelectedSolutionId(null);
     }
@@ -61,7 +103,7 @@ const Dashboard: React.FC = () => {
           Overview
         </span>
       ),
-      children: <Overview onNavigateToTab={setActiveTab} onNavigateToSolution={handleNavigateToSolution} />,
+      children: <Overview onNavigateToTab={handleNavigateToTab} onNavigateToSolution={handleNavigateToSolution} />,
     },
     {
       key: 'solutions',
@@ -92,6 +134,16 @@ const Dashboard: React.FC = () => {
         </span>
       ),
       children: <ContainerServiceManager />,
+    },
+    {
+      key: 'network',
+      label: (
+        <span>
+          <SecurityScanOutlined />
+          Network Security
+        </span>
+      ),
+      children: <NetworkManager />,
     },
     ...(user?.role === 'admin' ? [{
       key: 'users',
