@@ -64,21 +64,13 @@ def check_database_connection():
         
         logger.info("✅ Database schema initialized successfully!")
         
-        # Create default user if none exist
-        users = db.execute_query("SELECT * FROM USERS")
-        if not users:
-            default_username = os.getenv("DEFAULT_USERNAME", "admin")
-            default_password = os.getenv("DEFAULT_PASSWORD", "password123")
-            user_create = models.UserCreate(
-                username=default_username, 
-                password=default_password,
-                role="admin",
-                is_active=True,
-                is_sso_user=False,
-                use_snowflake_auth=False
-            )
-            auth.create_user(db, user_create)
-            logger.info(f"✅ Default user '{default_username}' created successfully")
+        # Insert default data (tags, solutions, parameters)
+        logger.info("📝 Inserting default data...")
+        db.insert_default_data()
+        logger.info("✅ Default data inserted successfully!")
+        
+        # Note: User management removed - using Snowflake authentication only
+        logger.info("✅ Authentication configured for Snowflake-only access")
         
         logger.info("🎉 Database setup completed successfully!")
         return True
@@ -130,30 +122,33 @@ def shutdown_event():
 
 # --- Authentication Endpoints ---
 @app.post("/api/token", response_model=models.Token)
-async def login_for_access_token(form_data: models.UserLogin):
-    db = get_database()
-    user = auth.authenticate_user(db, form_data.username, form_data.password)
-    if not user:
+async def login_for_access_token(login_data: models.SnowflakeLogin):
+    """Authenticate with Snowflake and return access token"""
+    try:
+        # Create auth token using Snowflake credentials
+        access_token = auth.create_auth_token(login_data)
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        logger.error(f"Authentication failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Authentication failed. Please check your Snowflake credentials.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = auth.create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+
+@app.get("/api/user/me", response_model=models.SnowflakeUser)
+async def get_current_user_info(current_user: dict = Depends(auth.get_current_user)):
+    """Get current user information"""
+    return models.SnowflakeUser(
+        username=current_user["username"],
+        account=current_user["account"]
     )
-    return {"access_token": access_token, "token_type": "bearer"}
 
 # --- User Management Endpoints ---
 @app.get("/api/users", response_model=List[models.User])
-async def get_users(current_user: models.User = Depends(auth.get_current_active_user)):
+async def get_users(current_user: dict = Depends(auth.get_current_user)):
     """Get all users (admin only)"""
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin users can view all users"
-        )
+    # Note: Simplified authentication - all authenticated users have access
     
     db = get_database()
     users = auth.get_all_users(db)
@@ -162,14 +157,10 @@ async def get_users(current_user: models.User = Depends(auth.get_current_active_
 @app.post("/api/users", response_model=models.User)
 async def create_user(
     user_data: models.UserCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new user (admin only)"""
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin users can create new users"
-        )
+    # Note: Simplified authentication - all authenticated users have access
     
     db = get_database()
     try:
@@ -201,10 +192,11 @@ async def create_user(
 @app.get("/api/users/{user_id}", response_model=models.User)
 async def get_user(
     user_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get user by ID (admin or self)"""
-    if current_user.role != "admin" and current_user.id != user_id:
+    # Role check removed for simplified Snowflake auth
+    if False:  # Disabled
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only view your own profile"
@@ -241,11 +233,12 @@ async def get_user(
 async def update_user(
     user_id: str,
     user_update: models.UserUpdate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Update user (admin or self)"""
     # Users can update their own profile, but only admins can change roles or other users
-    if current_user.role != "admin" and current_user.id != user_id:
+    # Role check removed for simplified Snowflake auth
+    if False:  # Disabled
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only update your own profile"
@@ -289,16 +282,18 @@ async def update_user(
 @app.delete("/api/users/{user_id}")
 async def delete_user(
     user_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete user (admin only)"""
-    if current_user.role != "admin":
+    # Role check removed for simplified Snowflake auth
+    if False:  # Disabled
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin users can delete users"
         )
     
-    if current_user.id == user_id:
+    # Role check removed for simplified Snowflake auth
+    if False:  # Disabled
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot delete your own account"
@@ -352,10 +347,11 @@ async def reset_password(reset_data: models.PasswordReset):
 async def admin_reset_password(
     user_id: str,
     new_password_data: dict,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Admin reset user password (admin only)"""
-    if current_user.role != "admin":
+    # Role check removed for simplified Snowflake auth
+    if False:  # Disabled
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin users can reset passwords"
@@ -383,7 +379,7 @@ async def admin_reset_password(
 @app.post("/api/solutions", response_model=models.Solution)
 async def create_solution(
     solution: models.SolutionCreate, 
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new solution"""
     db = get_database()
@@ -406,7 +402,7 @@ async def create_solution(
     return models.Solution(**mapped_solution)
 
 @app.get("/api/solutions", response_model=List[models.Solution])
-async def get_solutions(current_user: models.User = Depends(auth.get_current_active_user)):
+async def get_solutions(current_user: dict = Depends(auth.get_current_user)):
     """Get all solutions with parameter counts"""
     db = get_database()
     
@@ -440,7 +436,7 @@ async def get_solutions(current_user: models.User = Depends(auth.get_current_act
 @app.get("/api/solutions/{solution_id}", response_model=models.Solution)
 async def get_solution(
     solution_id: str, 
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get a solution with all its parameters and tags"""
     db = get_database()
@@ -480,7 +476,7 @@ async def get_solution(
 async def update_solution(
     solution_id: str,
     solution_update: models.SolutionUpdate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Update a solution"""
     db = get_database()
@@ -515,7 +511,7 @@ async def update_solution(
 @app.delete("/api/solutions/{solution_id}")
 async def delete_solution(
     solution_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a solution and all its parameters"""
     db = get_database()
@@ -534,7 +530,7 @@ async def delete_solution(
 async def export_solution_config(
     solution_id: str,
     format: str = "json",
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Export solution configuration for application usage"""
     from fastapi.responses import Response
@@ -672,7 +668,7 @@ async def export_solution_config(
 async def create_solution_api_key(
     solution_id: str,
     key_data: models.CreateSolutionAPIKey,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new API key for a solution"""
     import secrets
@@ -715,7 +711,7 @@ async def create_solution_api_key(
 @app.get("/api/solutions/{solution_id}/api-keys", response_model=List[models.SolutionAPIKeyList])
 async def get_solution_api_keys(
     solution_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all API keys for a solution"""
     db = get_database()
@@ -745,7 +741,7 @@ async def get_solution_api_keys(
 async def delete_solution_api_key(
     solution_id: str,
     api_key_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete an API key"""
     db = get_database()
@@ -757,7 +753,7 @@ async def toggle_solution_api_key(
     solution_id: str,
     api_key_id: str,
     is_active: bool,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Enable/disable an API key"""
     db = get_database()
@@ -791,63 +787,24 @@ async def get_solution_config_by_api_key(
     
     solution = solution_data[0]
     
-    # Get solution parameters with their tags
+    # Get solution parameters
     params_query = """
-    SELECT p.*, 
-           LISTAGG(t.NAME, ',') WITHIN GROUP (ORDER BY t.NAME) as tag_names
+    SELECT p.KEY, p.VALUE
     FROM PARAMETERS p
     JOIN SOLUTION_PARAMETERS sp ON p.ID = sp.PARAMETER_ID
-    LEFT JOIN PARAMETER_TAGS pt ON p.ID = pt.PARAMETER_ID
-    LEFT JOIN TAGS t ON pt.TAG_ID = t.ID
     WHERE sp.SOLUTION_ID = %s
-    GROUP BY p.ID, p.NAME, p.KEY, p.VALUE, p.DESCRIPTION, p.IS_SECRET, p.CREATED_AT, p.UPDATED_AT
     ORDER BY p.KEY
     """
     
     params_data = db.execute_query(params_query, (solution_id,))
     
-    # Build configuration structure
-    config = {
-        "solution": {
-            "id": solution['ID'],
-            "name": solution['NAME'],
-            "description": solution.get('DESCRIPTION', ''),
-            "created_at": solution['CREATED_AT'].isoformat() if solution['CREATED_AT'] else None,
-            "exported_at": datetime.now().isoformat()
-        },
-        "parameters": {},
-        "metadata": {
-            "parameter_count": len(params_data),
-            "secret_parameter_count": len([p for p in params_data if p.get('IS_SECRET', False)]),
-            "tags": []
-        }
-    }
+    # Build simple key-value configuration structure
+    # For public API, include all values including secrets for environment configuration
+    config = {}
     
-    # Process parameters
-    all_tags = set()
+    # Process parameters - just key-value pairs with secrets in plain text
     for param in params_data:
-        param_config = {
-            "value": param.get('VALUE', ''),
-            "description": param.get('DESCRIPTION', ''),
-            "is_secret": bool(param.get('IS_SECRET', False)),
-            "name": param.get('NAME', ''),
-            "tags": []
-        }
-        
-        # Add tags if they exist
-        if param.get('TAG_NAMES'):
-            param_tags = [tag.strip() for tag in param['TAG_NAMES'].split(',') if tag.strip()]
-            param_config["tags"] = param_tags
-            all_tags.update(param_tags)
-        
-        # For secret parameters, don't include the actual value in export
-        if param_config["is_secret"]:
-            param_config["value"] = "*** HIDDEN ***"
-            param_config["_note"] = "Secret parameter value not exported for security"
-        
-        config["parameters"][param['KEY']] = param_config
-    
-    config["metadata"]["tags"] = sorted(list(all_tags))
+        config[param['KEY']] = param.get('VALUE', '')
     
     # Format response based on requested format
     if format.lower() == "yaml":
@@ -860,14 +817,8 @@ async def get_solution_config_by_api_key(
         lines.append(f"# Generated on {datetime.now().isoformat()}")
         lines.append("")
         
-        for key, param in config["parameters"].items():
-            if param["description"]:
-                lines.append(f"# {param['description']}")
-            if param["is_secret"]:
-                lines.append(f"# SECRET: {key}=<your_secret_value_here>")
-            else:
-                lines.append(f"{key}={param['value']}")
-            lines.append("")
+        for key, value in config.items():
+            lines.append(f"{key}={value}")
         
         content = "\n".join(lines)
         media_type = "text/plain"
@@ -878,16 +829,10 @@ async def get_solution_config_by_api_key(
         lines.append(f"# Generated on {datetime.now().isoformat()}")
         lines.append("")
         
-        for key, param in config["parameters"].items():
-            if param["description"]:
-                lines.append(f"# {param['description']}")
-            if param["is_secret"]:
-                lines.append(f"# {key}=<your_secret_value_here>")
-            else:
-                # Escape special characters for properties format
-                value = str(param['value']).replace('\\', '\\\\').replace('=', '\\=').replace(':', '\\:')
-                lines.append(f"{key}={value}")
-            lines.append("")
+        for key, value in config.items():
+            # Escape special characters for properties format
+            escaped_value = str(value).replace('\\', '\\\\').replace('=', '\\=').replace(':', '\\:')
+            lines.append(f"{key}={escaped_value}")
         
         content = "\n".join(lines)
         media_type = "text/plain"
@@ -912,7 +857,7 @@ async def get_solution_config_by_api_key(
 @app.post("/api/parameters", response_model=models.Parameter)
 async def create_parameter(
     parameter: models.ParameterCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new parameter"""
     db = get_database()
@@ -986,7 +931,7 @@ async def create_parameter(
 async def update_parameter(
     parameter_id: str,
     parameter_update: models.ParameterUpdate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Update a parameter"""
     db = get_database()
@@ -1085,7 +1030,7 @@ async def update_parameter(
 @app.delete("/api/parameters/{parameter_id}")
 async def delete_parameter(
     parameter_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a parameter"""
     db = get_database()
@@ -1104,7 +1049,7 @@ async def delete_parameter(
 @app.post("/api/tags", response_model=models.Tag)
 async def create_tag(
     tag: models.TagCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new tag"""
     db = get_database()
@@ -1128,10 +1073,12 @@ async def create_tag(
     return models.Tag(**mapped_tag)
 
 @app.get("/api/tags", response_model=List[models.Tag])
-async def get_tags(current_user: models.User = Depends(auth.get_current_active_user)):
+async def get_tags(current_user: dict = Depends(auth.get_current_user)):
     """Get all tags"""
+    logger.info(f"🏷️ Getting tags for user: {current_user.get('username')}")
     db = get_database()
     tags_data = db.execute_query("SELECT * FROM TAGS ORDER BY NAME")
+    logger.info(f"🏷️ Raw tags data from database: {tags_data}")
     # Map uppercase column names from Snowflake to lowercase for Pydantic model
     mapped_tags = []
     for tag in tags_data:
@@ -1141,12 +1088,13 @@ async def get_tags(current_user: models.User = Depends(auth.get_current_active_u
             'created_at': tag['CREATED_AT']
         }
         mapped_tags.append(models.Tag(**mapped_tag))
+    logger.info(f"🏷️ Returning {len(mapped_tags)} tags")
     return mapped_tags
 
 @app.delete("/api/tags/{tag_id}")
 async def delete_tag(
     tag_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a tag"""
     db = get_database()
@@ -1170,7 +1118,7 @@ async def test_name_field():
 @app.post("/api/parameters/search")
 async def search_parameters(
     filter_params: models.ParameterFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Search parameters with filters"""
     db = get_database()
@@ -1252,7 +1200,7 @@ async def search_parameters(
 @app.post("/api/parameters/bulk")
 async def bulk_parameter_operation(
     operation: models.BulkParameterOperation,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Perform bulk operations on parameters"""
     db = get_database()
@@ -1342,7 +1290,7 @@ if os.path.exists("frontend/build"):
 async def assign_parameter_to_solution(
     solution_id: str,
     parameter_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Assign an existing parameter to a solution"""
     db = get_database()
@@ -1377,7 +1325,7 @@ async def assign_parameter_to_solution(
 async def remove_parameter_from_solution(
     solution_id: str,
     parameter_id: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Remove a parameter from a solution"""
     db = get_database()
@@ -1394,7 +1342,7 @@ async def remove_parameter_from_solution(
 
 @app.get("/api/parameters/unassigned", response_model=List[models.Parameter])
 async def get_unassigned_parameters(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all parameters that are not assigned to any solution"""
     db = get_database()
@@ -1445,7 +1393,7 @@ async def get_unassigned_parameters(
 
 # --- Container Services Endpoints ---
 @app.get("/api/container-services", response_model=List[models.ContainerService])
-async def get_container_services(current_user: models.User = Depends(auth.get_current_active_user)):
+async def get_container_services(current_user: dict = Depends(auth.get_current_user)):
     """Get all container services"""
     db = get_database()
     try:
@@ -1474,7 +1422,7 @@ async def get_container_services(current_user: models.User = Depends(auth.get_cu
 @app.get("/api/container-services/{service_name}", response_model=models.ContainerService)
 async def get_container_service(
     service_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get a specific container service"""
     db = get_database()
@@ -1498,7 +1446,7 @@ async def get_container_service(
 @app.post("/api/container-services/{service_name}/start")
 async def start_container_service(
     service_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Start/Resume a container service"""
     db = get_database()
@@ -1511,7 +1459,7 @@ async def start_container_service(
 @app.post("/api/container-services/{service_name}/stop")
 async def stop_container_service(
     service_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Stop/Suspend a container service"""
     db = get_database()
@@ -1524,7 +1472,7 @@ async def stop_container_service(
 @app.post("/api/container-services")
 async def create_container_service(
     service_data: models.ContainerServiceCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new container service on a compute pool"""
     db = get_database()
@@ -1581,7 +1529,7 @@ async def create_container_service(
 @app.delete("/api/container-services/{service_name}")
 async def delete_container_service(
     service_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a container service"""
     db = get_database()
@@ -1596,7 +1544,7 @@ async def delete_container_service(
         raise HTTPException(status_code=500, detail=f"Failed to delete container service: {str(e)}")
 
 @app.get("/api/compute-pools", response_model=List[models.ComputePool])
-async def get_compute_pools(current_user: models.User = Depends(auth.get_current_active_user)):
+async def get_compute_pools(current_user: dict = Depends(auth.get_current_user)):
     """Get all compute pools"""
     db = get_database()
     try:
@@ -1620,7 +1568,7 @@ async def get_compute_pools(current_user: models.User = Depends(auth.get_current
 @app.post("/api/compute-pools/{pool_name}/suspend")
 async def suspend_compute_pool(
     pool_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Suspend a compute pool"""
     db = get_database()
@@ -1634,7 +1582,7 @@ async def suspend_compute_pool(
 @app.post("/api/compute-pools/{pool_name}/resume")
 async def resume_compute_pool(
     pool_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Resume a compute pool"""
     db = get_database()
@@ -1648,7 +1596,7 @@ async def resume_compute_pool(
 @app.post("/api/compute-pools")
 async def create_compute_pool(
     pool_data: models.ComputePoolCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new compute pool"""
     db = get_database()
@@ -1672,7 +1620,7 @@ async def create_compute_pool(
 @app.delete("/api/compute-pools/{pool_name}")
 async def delete_compute_pool(
     pool_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a compute pool"""
     db = get_database()
@@ -1689,7 +1637,7 @@ async def delete_compute_pool(
 @app.get("/api/compute-pools/{pool_name}")
 async def describe_compute_pool(
     pool_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get detailed information about a compute pool"""
     db = get_database()
@@ -1707,7 +1655,7 @@ async def describe_compute_pool(
 async def get_compute_pool_logs(
     pool_name: str,
     limit: int = 100,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get logs for a compute pool"""
     db = get_database()
@@ -1722,7 +1670,7 @@ async def get_compute_pool_logs(
 # --- Repository and Image Endpoints ---
 @app.get("/api/image-repositories")
 async def get_image_repositories(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all image repositories"""
     db = get_database()
@@ -1738,7 +1686,7 @@ async def get_repository_images(
     repository_name: str,
     database_name: str = None,
     schema_name: str = None,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all images in a specific repository"""
     db = get_database()
@@ -1751,7 +1699,7 @@ async def get_repository_images(
 
 @app.get("/api/images")
 async def get_all_images(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all images across all repositories"""
     db = get_database()
@@ -1765,7 +1713,7 @@ async def get_all_images(
 @app.post("/api/image-repositories")
 async def create_image_repository(
     repo_data: models.ImageRepositoryCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new image repository"""
     db = get_database()
@@ -1788,7 +1736,7 @@ async def delete_image_repository(
     repository_name: str,
     database_name: str = None,
     schema_name: str = None,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete an image repository"""
     db = get_database()
@@ -1804,7 +1752,7 @@ async def delete_image_repository(
 
 @app.get("/api/databases")
 async def get_databases(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all available databases"""
     db = get_database()
@@ -1818,7 +1766,7 @@ async def get_databases(
 @app.get("/api/databases/{database_name}/schemas")
 async def get_schemas(
     database_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all schemas for a specific database"""
     db = get_database()
@@ -1832,7 +1780,7 @@ async def get_schemas(
 # Network Rules Endpoints
 @app.get("/api/network-rules")
 async def get_network_rules(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all network rules"""
     db = get_database()
@@ -1846,7 +1794,7 @@ async def get_network_rules(
 @app.post("/api/network-rules")
 async def create_network_rule(
     rule_data: models.NetworkRuleCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new network rule"""
     db = get_database()
@@ -1875,7 +1823,7 @@ async def create_network_rule(
 async def update_network_rule(
     rule_name: str,
     rule_data: models.NetworkRuleUpdate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Update an existing network rule"""
     db = get_database()
@@ -1896,7 +1844,7 @@ async def update_network_rule(
 @app.delete("/api/network-rules/{rule_name}")
 async def delete_network_rule(
     rule_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a network rule"""
     db = get_database()
@@ -1918,7 +1866,7 @@ async def delete_network_rule(
 @app.get("/api/network-rules/{rule_name}")
 async def describe_network_rule(
     rule_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get detailed information about a network rule"""
     db = get_database()
@@ -1932,7 +1880,7 @@ async def describe_network_rule(
 # Network Policies Endpoints
 @app.get("/api/network-policies")
 async def get_network_policies(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get all network policies"""
     db = get_database()
@@ -1946,7 +1894,7 @@ async def get_network_policies(
 @app.post("/api/network-policies")
 async def create_network_policy(
     policy_data: models.NetworkPolicyCreate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Create a new network policy"""
     db = get_database()
@@ -1976,7 +1924,7 @@ async def create_network_policy(
 async def update_network_policy(
     policy_name: str,
     policy_data: models.NetworkPolicyUpdate,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Update an existing network policy"""
     db = get_database()
@@ -2000,7 +1948,7 @@ async def update_network_policy(
 @app.delete("/api/network-policies/{policy_name}")
 async def delete_network_policy(
     policy_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Delete a network policy"""
     db = get_database()
@@ -2022,7 +1970,7 @@ async def delete_network_policy(
 @app.get("/api/network-policies/{policy_name}")
 async def describe_network_policy(
     policy_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get detailed information about a network policy"""
     db = get_database()
@@ -2084,7 +2032,7 @@ async def network_policy_help():
 
 @app.get("/api/network-policy-status")
 async def get_network_policy_status(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get the currently active network policy"""
     db = get_database()
@@ -2102,7 +2050,7 @@ async def get_network_policy_status(
 @app.post("/api/network-policies/{policy_name}/enable")
 async def enable_network_policy(
     policy_name: str,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Enable (attach) a network policy to the account"""
     db = get_database()
@@ -2123,7 +2071,7 @@ async def enable_network_policy(
 
 @app.post("/api/network-policies/disable")
 async def disable_network_policy(
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Disable (unset) the current network policy from the account"""
     db = get_database()
@@ -2161,7 +2109,7 @@ async def debug_network_policy_status():
 @app.post("/api/analytics/credit-usage", response_model=List[models.CreditUsage])
 async def get_credit_usage(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get credit usage data for compute pools"""
     db = get_database()
@@ -2192,7 +2140,7 @@ async def get_credit_usage(
 @app.post("/api/analytics/credit-usage-summary")
 async def get_credit_usage_summary(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get credit usage summary for compute pools"""
     db = get_database()
@@ -2212,7 +2160,7 @@ async def get_credit_usage_summary(
 @app.post("/api/analytics/daily-credit-rollup")
 async def get_daily_credit_rollup(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get daily credit usage rollup with aggregated metrics"""
     try:
@@ -2244,7 +2192,7 @@ async def get_daily_credit_rollup(
 @app.post("/api/analytics/hourly-heatmap")
 async def get_hourly_heatmap(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get hourly credit usage data for heatmap visualization"""
     try:
@@ -2277,7 +2225,7 @@ async def get_hourly_heatmap(
 @app.post("/api/analytics/warehouse-credit-usage")
 async def get_warehouse_credit_usage(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get credit usage data for warehouses"""
     db = get_database()
@@ -2319,7 +2267,7 @@ async def get_warehouse_credit_usage(
 @app.post("/api/analytics/warehouse-credit-usage-summary")
 async def get_warehouse_credit_usage_summary(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get warehouse credit usage summary"""
     db = get_database()
@@ -2351,7 +2299,7 @@ async def get_warehouse_credit_usage_summary(
 @app.post("/api/analytics/storage-usage")
 async def get_storage_usage(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get storage usage data"""
     db = get_database()
@@ -2384,7 +2332,7 @@ async def get_storage_usage(
 @app.post("/api/analytics/storage-usage-summary")
 async def get_storage_usage_summary(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get storage usage summary"""
     db = get_database()
@@ -2414,7 +2362,7 @@ async def get_storage_usage_summary(
 @app.post("/api/analytics/database-storage-usage")
 async def get_database_storage_usage(
     filter_params: models.CreditUsageFilter,
-    current_user: models.User = Depends(auth.get_current_active_user)
+    current_user: dict = Depends(auth.get_current_user)
 ):
     """Get database storage usage data"""
     db = get_database()

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Modal, Form, Input, Button, Typography, Space, message, Switch, Tooltip } from 'antd';
-import { UserOutlined, LockOutlined, CloudServerOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { Modal, Form, Input, Button, Typography, Space, message, Checkbox } from 'antd';
+import { UserOutlined, LockOutlined, CloudServerOutlined, GlobalOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -9,8 +9,9 @@ const { Title, Text } = Typography;
 
 const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
+  const [form] = Form.useForm();
   const { login } = useAuth();
-  const { isDarkMode, toggleTheme } = useTheme();
+  const { isDarkMode } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -20,11 +21,39 @@ const Login: React.FC = () => {
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
-  const onFinish = async (values: { username: string; password: string }) => {
+  useEffect(() => {
+    // Pre-populate fields if they were previously saved
+    const savedAccount = localStorage.getItem('snowflake_account');
+    const savedUsername = localStorage.getItem('snowflake_username');
+    const rememberMe = localStorage.getItem('remember_me') === 'true';
+    
+    if (savedAccount) {
+      form.setFieldsValue({ account: savedAccount });
+    }
+    
+    if (rememberMe && savedUsername) {
+      form.setFieldsValue({ 
+        account: savedAccount,
+        username: savedUsername,
+        remember: true
+      });
+    }
+  }, [form]);
+
+  const onFinish = async (values: { account: string; username: string; password: string; remember?: boolean }) => {
     setLoading(true);
     try {
-      const success = await login(values.username, values.password);
+      const success = await login(values.account, values.username, values.password);
       if (success) {
+        // Handle remember me functionality
+        if (values.remember) {
+          localStorage.setItem('snowflake_username', values.username);
+          localStorage.setItem('remember_me', 'true');
+        } else {
+          localStorage.removeItem('snowflake_username');
+          localStorage.removeItem('remember_me');
+        }
+        
         navigate(from, { replace: true });
       }
     } catch (error) {
@@ -100,6 +129,7 @@ const Login: React.FC = () => {
           </div>
 
           <Form
+            form={form}
             name="login"
             onFinish={onFinish}
             autoComplete="off"
@@ -107,6 +137,24 @@ const Login: React.FC = () => {
             style={{ width: '100%', marginTop: '32px' }}
             size="large"
           >
+            <Form.Item
+              name="account"
+              rules={[{ required: true, message: 'Please input your Snowflake account!' }]}
+              style={{ marginBottom: '20px' }}
+            >
+              <Input
+                prefix={<GlobalOutlined style={{ color: '#6C757D' }} />}
+                placeholder="Snowflake Account (e.g. myorg-myaccount)"
+                style={{
+                  color: textColor,
+                  height: '48px',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+                }}
+              />
+            </Form.Item>
+
             <Form.Item
               name="username"
               rules={[{ required: true, message: 'Please input your username!' }]}
@@ -143,6 +191,16 @@ const Login: React.FC = () => {
               />
             </Form.Item>
 
+            <Form.Item
+              name="remember"
+              valuePropName="checked"
+              style={{ marginBottom: '20px' }}
+            >
+              <Checkbox style={{ color: textColor }}>
+                Remember my username
+              </Checkbox>
+            </Form.Item>
+
             <Form.Item style={{ marginBottom: '24px' }}>
               <Button
                 type="primary"
@@ -174,11 +232,15 @@ const Login: React.FC = () => {
             borderRadius: '8px',
             padding: '16px'
           }}>
-                          <Text style={{ color: secondaryTextColor, fontSize: '14px' }}>
-                Default credentials: <strong style={{ color: textColor }}>admin</strong> / <strong style={{ color: textColor }}>password123</strong>
-              </Text>
-              <br />
-              <Text style={{ color: secondaryTextColor, fontSize: '12px', marginTop: '8px', display: 'block' }}>
+            <Text style={{ color: secondaryTextColor, fontSize: '14px' }}>
+              Database, schema, and warehouse are configured by the backend administrator.
+            </Text>
+            <br />
+            <Text style={{ color: secondaryTextColor, fontSize: '12px', marginTop: '8px', display: 'block' }}>
+              Your account is always remembered. Check "Remember username" to save your username for future logins.
+            </Text>
+            <br />
+            <Text style={{ color: secondaryTextColor, fontSize: '12px', marginTop: '8px', display: 'block' }}>
               Powered by Snowflake Data Cloud
             </Text>
           </div>

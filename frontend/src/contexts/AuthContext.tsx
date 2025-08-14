@@ -2,28 +2,16 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { App } from 'antd';
 import { api } from '../services/api.ts';
 
-interface User {
-  id: string;
+interface SnowflakeUser {
   username: string;
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  role: string;
-  is_active: boolean;
-  is_sso_user: boolean;
-  sso_provider?: string;
-  sso_user_id?: string;
-  use_snowflake_auth: boolean;
-  last_login?: string;
-  created_at: string;
-  updated_at?: string;
+  account: string;
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: SnowflakeUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (account: string, username: string, password: string) => Promise<boolean>;
   logout: () => void;
 }
 
@@ -34,14 +22,14 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<SnowflakeUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { message } = App.useApp();
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      // Verify token validity by making a test request
+      // Verify token validity by getting user info
       checkTokenValidity();
     } else {
       setIsLoading(false);
@@ -50,51 +38,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const checkTokenValidity = async () => {
     try {
-      // Make a test request to verify token
-      await api.get('/solutions');
-      // If we get here, token is valid, but we don't have user info from this endpoint
-      // For now, we'll create a mock user object
-      const mockUser: User = {
-        id: 'current-user',
-        username: 'admin', // This could be decoded from JWT in a real app
-        role: 'admin',
-        is_active: true,
-        is_sso_user: false,
-        use_snowflake_auth: false,
-        created_at: new Date().toISOString(),
-      };
-      setUser(mockUser);
+      // Get current user info to verify token and get user details
+      const response = await api.get('/user/me');
+      setUser(response.data);
     } catch (error) {
       localStorage.removeItem('token');
+      localStorage.removeItem('snowflake_account');
       setUser(null);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const login = async (username: string, password: string): Promise<boolean> => {
+  const login = async (account: string, username: string, password: string): Promise<boolean> => {
     try {
       setIsLoading(true);
-      const response = await api.post('/token', { username, password });
+      const response = await api.post('/token', { account, username, password });
       const { access_token } = response.data;
       
       localStorage.setItem('token', access_token);
+      localStorage.setItem('snowflake_account', account);
       
-      const loggedInUser: User = {
-        id: 'current-user',
+      const loggedInUser: SnowflakeUser = {
         username,
-        role: 'admin', // Default to admin for now
-        is_active: true,
-        is_sso_user: false,
-        use_snowflake_auth: false,
-        created_at: new Date().toISOString(),
+        account
       };
       
       setUser(loggedInUser);
       message.success('Logged in successfully!');
       return true;
     } catch (error: any) {
-      message.error('Login failed. Please check your credentials.');
+      message.error('Login failed. Please check your Snowflake credentials.');
       return false;
     } finally {
       setIsLoading(false);
@@ -103,6 +77,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('token');
+    // Always keep account, only remove username/remember_me if remember was not checked
+    const rememberMe = localStorage.getItem('remember_me') === 'true';
+    if (!rememberMe) {
+      localStorage.removeItem('snowflake_username');
+      localStorage.removeItem('remember_me');
+    }
+    // Never remove snowflake_account - always remember it
     setUser(null);
     message.success('Logged out successfully!');
   };

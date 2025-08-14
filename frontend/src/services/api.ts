@@ -57,58 +57,16 @@ export interface UpdateParameter {
   tags?: string[];
 }
 
-// User Management Interfaces
-export interface User {
-  id: string;
+// Snowflake Authentication Interfaces
+export interface SnowflakeUser {
   username: string;
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  role: string;
-  is_active: boolean;
-  is_sso_user: boolean;
-  sso_provider?: string;
-  sso_user_id?: string;
-  use_snowflake_auth: boolean;
-  last_login?: string;
-  created_at: string;
-  updated_at?: string;
+  account: string;
 }
 
-export interface CreateUser {
+export interface SnowflakeLogin {
+  account: string;
   username: string;
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  password?: string;
-  role?: string;
-  is_active?: boolean;
-  is_sso_user?: boolean;
-  sso_provider?: string;
-  sso_user_id?: string;
-  use_snowflake_auth?: boolean;
-}
-
-export interface UpdateUser {
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  role?: string;
-  is_active?: boolean;
-  is_sso_user?: boolean;
-  sso_provider?: string;
-  sso_user_id?: string;
-  use_snowflake_auth?: boolean;
-}
-
-export interface PasswordResetRequest {
-  username: string;
-}
-
-export interface PasswordReset {
-  username: string;
-  new_password: string;
-  reset_token?: string;
+  password: string;
 }
 
 // Analytics Interfaces
@@ -367,8 +325,10 @@ class ApiService {
   private axiosInstance: AxiosInstance;
 
   constructor() {
+    // Use relative URLs when proxy is configured, absolute URLs otherwise
+    const baseURL = process.env.REACT_APP_API_BASE_URL || '/api';
     this.axiosInstance = axios.create({
-      baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api',
+      baseURL: baseURL,
       timeout: 60000, // Increased to 30 seconds for storage queries
       headers: {
         'Content-Type': 'application/json',
@@ -418,8 +378,13 @@ class ApiService {
   }
 
   // Authentication
-  async login(username: string, password: string) {
-    return this.post('/token', { username, password });
+  async login(account: string, username: string, password: string) {
+    return this.post('/token', { account, username, password });
+  }
+
+  // Get current user info
+  async getCurrentUser() {
+    return this.get('/user/me');
   }
 
   // Solutions
@@ -489,38 +454,7 @@ class ApiService {
     return this.delete(`/tags/${id}`);
   }
 
-  // User Management
-  async getUsers(): Promise<AxiosResponse<User[]>> {
-    return this.get('/users');
-  }
 
-  async createUser(user: CreateUser): Promise<AxiosResponse<User>> {
-    return this.post('/users', user);
-  }
-
-  async getUser(id: string): Promise<AxiosResponse<User>> {
-    return this.get(`/users/${id}`);
-  }
-
-  async updateUser(id: string, user: UpdateUser): Promise<AxiosResponse<User>> {
-    return this.put(`/users/${id}`, user);
-  }
-
-  async deleteUser(id: string): Promise<AxiosResponse<ApiResponse>> {
-    return this.delete(`/users/${id}`);
-  }
-
-  async requestPasswordReset(request: PasswordResetRequest): Promise<AxiosResponse<any>> {
-    return this.post('/users/password-reset-request', request);
-  }
-
-  async resetPassword(reset: PasswordReset): Promise<AxiosResponse<ApiResponse>> {
-    return this.post('/users/password-reset', reset);
-  }
-
-  async adminResetPassword(userId: string, newPassword: string): Promise<AxiosResponse<ApiResponse>> {
-    return this.post(`/users/${userId}/reset-password`, { new_password: newPassword });
-  }
 
   // Health check
   async healthCheck(): Promise<AxiosResponse<any>> {

@@ -1,17 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Button, Typography, Space, Avatar, Tabs, Switch, Tooltip } from 'antd';
+import { Layout, Menu, Button, Typography, Space, Avatar, Tabs, Switch, Tooltip, Dropdown } from 'antd';
 import { 
   DashboardOutlined, 
   UserOutlined, 
   LogoutOutlined, 
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
   SunOutlined,
   MoonOutlined,
   BarChartOutlined,
   SecurityScanOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useTheme } from '../contexts/ThemeContext.tsx';
@@ -19,20 +18,19 @@ import Overview from './Overview.tsx';
 import SolutionManager from './SolutionManager.tsx';
 import ContainerServiceManager from './ContainerServiceManager.tsx';
 import NetworkManager from './NetworkManager.tsx';
-import UserManager from './UserManager.tsx';
 import Analytics from './Analytics.tsx';
 
-const { Header, Sider, Content } = Layout;
+const { Header, Content } = Layout;
 const { Title } = Typography;
 const { TabPane } = Tabs;
 
 const Dashboard: React.FC = () => {
-  const [collapsed, setCollapsed] = useState(false);
+
   
   // Initialize activeTab from URL hash or default to 'overview'
   const getInitialTab = () => {
     const hash = window.location.hash.slice(1); // Remove the '#' character
-    const validTabs = ['overview', 'solutions', 'analytics', 'container-services', 'network', 'users'];
+    const validTabs = ['overview', 'solutions', 'container-services', 'network', 'analytics'];
     return validTabs.includes(hash) ? hash : 'overview';
   };
   
@@ -57,12 +55,55 @@ const Dashboard: React.FC = () => {
 
   // Dynamic colors for dark mode compatibility
   const headerBg = isDarkMode ? undefined : '#FFFFFF';
-  const siderBg = isDarkMode ? undefined : '#0D4F8C';
   const titleColor = isDarkMode ? 'var(--snowflake-primary)' : '#0D4F8C';
 
   const handleLogout = () => {
     logout();
   };
+
+  const userMenuItems = [
+    {
+      key: 'preferences',
+      label: (
+        <Space>
+          <SettingOutlined />
+          Preferences
+        </Space>
+      ),
+      children: [
+        {
+          key: 'theme',
+          label: (
+            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+              <span>
+                {isDarkMode ? <MoonOutlined /> : <SunOutlined />}
+                {isDarkMode ? 'Dark Mode' : 'Light Mode'}
+              </span>
+              <Switch
+                checked={isDarkMode}
+                onChange={toggleTheme}
+                size="small"
+              />
+            </Space>
+          ),
+          onClick: (e) => e.domEvent.stopPropagation(),
+        },
+      ],
+    },
+    {
+      type: 'divider',
+    },
+    {
+      key: 'logout',
+      label: (
+        <Space>
+          <LogoutOutlined />
+          Logout
+        </Space>
+      ),
+      onClick: handleLogout,
+    },
+  ];
 
   const handleNavigateToSolution = (solutionId: string) => {
     setSelectedSolutionId(solutionId);
@@ -116,16 +157,6 @@ const Dashboard: React.FC = () => {
       children: <SolutionManager selectedSolutionId={selectedSolutionId} onNavigateToSolution={handleNavigateToSolution} />,
     },
     {
-      key: 'analytics',
-      label: (
-        <span>
-          <BarChartOutlined />
-          Analytics
-        </span>
-      ),
-      children: <Analytics />,
-    },
-    {
       key: 'container-services',
       label: (
         <span>
@@ -145,88 +176,46 @@ const Dashboard: React.FC = () => {
       ),
       children: <NetworkManager />,
     },
-    ...(user?.role === 'admin' ? [{
-      key: 'users',
+    {
+      key: 'analytics',
       label: (
         <span>
-          <UserOutlined />
-          Users
+          <BarChartOutlined />
+          Analytics
         </span>
       ),
-      children: <UserManager />,
-    }] : []),
+      children: <Analytics />,
+    },
   ];
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={collapsed}
-        theme="dark"
-        style={{
-          background: siderBg,
-        }}
-      >
-        <div style={{ 
-          height: 64, 
-          margin: 16, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: collapsed ? 'center' : 'flex-start',
-          color: 'white',
-          fontWeight: 'bold',
-          fontSize: collapsed ? '16px' : '18px'
-        }}>
-          <CloudServerOutlined style={{ marginRight: collapsed ? 0 : 8 }} />
-          {!collapsed && 'Config Manager'}
-        </div>
-      </Sider>
-      
-      <Layout>
-        <Header style={{ 
-          padding: '0 24px', 
-          background: headerBg,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '1px solid #f0f0f0'
-        }}>
-          <Space>
-            <Button
-              type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-              style={{
-                fontSize: '16px',
-                width: 64,
-                height: 64,
-              }}
-            />
-            <Title level={4} style={{ margin: 0, color: titleColor }}>
-              Solution Configuration Manager
-            </Title>
-          </Space>
+      <Header style={{ 
+        padding: '0 24px', 
+        background: headerBg,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottom: '1px solid #f0f0f0'
+      }}>
+        <Space>
+          <CloudServerOutlined style={{ marginRight: 8, fontSize: '20px', color: '#1F86C9' }} />
+          <Title level={4} style={{ margin: 0, color: titleColor }}>
+            Solution Configuration Manager
+          </Title>
+        </Space>
           
           <Space>
-            <Tooltip title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
-              <Switch
-                checked={isDarkMode}
-                onChange={toggleTheme}
-                checkedChildren={<MoonOutlined />}
-                unCheckedChildren={<SunOutlined />}
-                style={{ marginRight: 16 }}
-              />
-            </Tooltip>
-            <Avatar icon={<UserOutlined />} />
-            <span>{user?.username}</span>
-            <Button 
-              type="primary" 
-              icon={<LogoutOutlined />} 
-              onClick={handleLogout}
+            <Dropdown 
+              menu={{ items: userMenuItems }}
+              placement="bottomRight"
+              trigger={['click']}
             >
-              Logout
-            </Button>
+              <Space style={{ cursor: 'pointer' }}>
+                <Avatar icon={<UserOutlined />} />
+                <span>{user?.username}</span>
+              </Space>
+            </Dropdown>
           </Space>
         </Header>
         
@@ -244,7 +233,6 @@ const Dashboard: React.FC = () => {
             style={{ height: '100%' }}
           />
         </Content>
-      </Layout>
     </Layout>
   );
 };

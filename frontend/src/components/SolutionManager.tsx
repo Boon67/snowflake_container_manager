@@ -19,7 +19,6 @@ import {
   Dropdown,
   Menu,
   Card,
-  Switch,
   Spin,
 } from 'antd';
 import {
@@ -46,27 +45,25 @@ import {
   UpdateSolution, 
   Parameter, 
   CreateParameter,
-  UpdateParameter,
   Tag,
   CreateTag,
   SolutionAPIKeyList,
-  CreateSolutionAPIKey,
   SolutionAPIKeyResponse
 } from '../services/api.ts';
-import { useTheme } from '../contexts/ThemeContext.tsx';
+import { useAuth } from '../contexts/AuthContext.tsx';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { TabPane } = Tabs;
 const { Item: MenuItem } = Menu;
-const { Option } = Select;
 
-interface TransferItem {
-  key: string;
-  title: string;
-  description?: string;
-  disabled?: boolean;
-}
+
+// interface TransferItem {  // Removed - not used
+//   key: string;
+//   title: string;
+//   description?: string;
+//   disabled?: boolean;
+// }
 
 interface SolutionManagerProps {
   selectedSolutionId?: string | null;
@@ -74,7 +71,7 @@ interface SolutionManagerProps {
 }
 
 const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, onNavigateToSolution }) => {
-  const { isDarkMode } = useTheme();
+  const { isAuthenticated } = useAuth();
   
   // Solutions state
   const [solutions, setSolutions] = useState<Solution[]>([]);
@@ -87,7 +84,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const [editingSolution, setEditingSolution] = useState<Solution | null>(null);
   const [form] = Form.useForm();
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
-  const [parameterLoading, setParameterLoading] = useState(false);
+
   const [parameterModalVisible, setParameterModalVisible] = useState(false);
   const [parameterForm] = Form.useForm();
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -97,7 +94,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [filteredParameters, setFilteredParameters] = useState<Parameter[]>([]);
   const [parameterSearchText, setParameterSearchText] = useState('');
-  const [parameterModalVisibleStandalone, setParameterModalVisibleStandalone] = useState(false);
+
   const [editingParameter, setEditingParameter] = useState<Parameter | null>(null);
   const [parameterFormStandalone] = Form.useForm();
   const [parameterDeleteLoading, setParameterDeleteLoading] = useState<string | null>(null);
@@ -106,8 +103,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const [tags, setTags] = useState<Tag[]>([]);
   const [filteredTags, setFilteredTags] = useState<Tag[]>([]);
   const [tagSearchText, setTagSearchText] = useState('');
-  const [tagModalVisible, setTagModalVisible] = useState(false);
-  const [tagForm] = Form.useForm();
+
   const [tagDeleteLoading, setTagDeleteLoading] = useState<string | null>(null);
   const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
   const [tagParameters, setTagParameters] = useState<Record<string, Parameter[]>>({});
@@ -118,14 +114,20 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const [apiKeyModalVisible, setApiKeyModalVisible] = useState(false);
   const [apiKeyForm] = Form.useForm();
   const [newApiKey, setNewApiKey] = useState<SolutionAPIKeyResponse | null>(null);
+  
+  // Tag modal state
+  const [tagModalVisible, setTagModalVisible] = useState(false);
+  const [tagForm] = Form.useForm();
 
   useEffect(() => {
-    loadSolutions();
-    loadAllParameters();
-    loadAllTags();
-    loadParameters();
-    loadTags();
-  }, []);
+    if (isAuthenticated) {
+      loadSolutions();
+      loadAllParameters();
+      loadAllTags();
+      loadParameters();
+      loadTags();
+    }
+  }, [isAuthenticated]);
 
   // Handle navigation to specific solution
   useEffect(() => {
@@ -171,10 +173,15 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const loadTags = async () => {
     try {
       const response = await api.getTags();
-      setTags(response.data);
-      setFilteredTags(response.data);
+      console.log('🏷️ Tags API Response:', response.data);
+      const tagsData = Array.isArray(response.data) ? response.data : [];
+      setTags(tagsData);
+      setFilteredTags(tagsData);
     } catch (error) {
+      console.error('❌ Failed to load tags:', error.response?.data || error.message);
       message.error('Failed to load tags');
+      setTags([]);
+      setFilteredTags([]);
     }
   };
 
@@ -258,9 +265,13 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
   const loadAllTags = async () => {
     try {
       const response = await api.getTags();
-      setAllTags(response.data);
+      console.log('🏷️ All Tags API Response:', response.data);
+      // Ensure we always set an array
+      setAllTags(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
+      console.error('❌ Failed to load all tags:', error.response?.data || error.message);
       message.error('Failed to load tags');
+      setAllTags([]); // Set empty array on error
     }
   };
 
@@ -811,41 +822,53 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     }
   };
 
-  const handleEditTag = async (values: any) => {
-    if (!editingTag) return;
+  const handleCreateTag = () => {
+    tagForm.resetFields();
+    setTagModalVisible(true);
+  };
 
+  const handleSaveTag = async (values: CreateTag) => {
     try {
-      await api.updateTag(editingTag.id, values);
-      message.success('Tag updated successfully');
-      loadTags();
-    } catch (error: any) {
-      message.error(error.response?.data?.detail || 'Failed to update tag');
-    } finally {
+      await api.createTag(values);
+      message.success('Tag created successfully');
       setTagModalVisible(false);
-      setEditingTag(null);
+      tagForm.resetFields();
+      loadTags();
+      loadAllTags();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'Failed to create tag');
     }
   };
 
-  const [editingTag, setEditingTag] = useState<Tag | null>(null);
+
+
+
 
   const handleEditParameter = (parameter: Parameter) => {
     setEditingParameter(parameter);
+    // Set the selected tags for the parameter
+    setSelectedTags(parameter.tags.map(tag => tag.id));
     parameterFormStandalone.setFieldsValue({
       name: parameter.name,
       key: parameter.key,
       value: parameter.value,
       description: parameter.description,
       is_secret: parameter.is_secret,
-      tags: parameter.tags.map(tag => tag.name),
     });
-    setParameterModalVisibleStandalone(true);
+    setParameterModalVisible(true);
   };
 
   const handleSaveParameterStandalone = async (values: any) => {
     try {
+      // Convert tag IDs to tag names for the API
+      const tagNames = selectedTags.map(tagId => {
+        const tag = allTags.find(t => t.id === tagId);
+        return tag ? tag.name : tagId;
+      });
+
       const parameterData = {
         ...values,
-        tags: values.tags || [],
+        tags: tagNames,
       };
 
       if (editingParameter) {
@@ -855,8 +878,9 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
         await api.createParameter(parameterData as CreateParameter);
         message.success('Parameter created successfully');
       }
-      setParameterModalVisibleStandalone(false);
+      setParameterModalVisible(false);
       setEditingParameter(null);
+      setSelectedTags([]);
       parameterFormStandalone.resetFields();
       loadParameters();
       loadAllParameters(); // Refresh the all parameters list too
@@ -865,21 +889,9 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
     }
   };
 
-  const loadParametersForTag = async (tagId: string, tagName: string) => {
-    if (tagParameters[tagId]) {
-      return; // Already loaded
-    }
 
-    setLoadingParameters(prev => ({ ...prev, [tagId]: true }));
-    try {
-      const response = await api.searchParameters({ tags: [tagName] });
-      setTagParameters(prev => ({ ...prev, [tagId]: response.data }));
-    } catch (error) {
-      message.error('Failed to load parameters for this tag');
-    } finally {
-      setLoadingParameters(prev => ({ ...prev, [tagId]: false }));
-    }
-  };
+
+
 
   return (
     <div>
@@ -973,7 +985,12 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
                       <Button
                         type="primary"
                         icon={<PlusOutlined />}
-                        onClick={() => setParameterModalVisibleStandalone(true)}
+                        onClick={() => {
+                          setEditingParameter(null);
+                          setSelectedTags([]);
+                          parameterFormStandalone.resetFields();
+                          setParameterModalVisible(true);
+                        }}
                       >
                         Create Parameter
                       </Button>
@@ -1019,7 +1036,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
               <div>
                 <Card>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Title level={3} style={{ margin: 0 }}>Tags Management</Title>
+                    <Title level={3} style={{ margin: 0 }}>Tag Management</Title>
                     <Space>
                       <Button
                         icon={<ReloadOutlined />}
@@ -1031,7 +1048,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
                       <Button
                         type="primary"
                         icon={<PlusOutlined />}
-                        onClick={() => setTagModalVisible(true)}
+                        onClick={handleCreateTag}
                       >
                         Create Tag
                       </Button>
@@ -1255,15 +1272,16 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
                 <div style={{ marginTop: 24, padding: 16, backgroundColor: '#f9f9f9', borderRadius: 6 }}>
                   <Title level={5}>Third-Party Access URLs</Title>
                   <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                    Use these URLs in your applications to fetch configuration without authentication:
+                    Use these URLs in your applications to fetch configuration without authentication.
+                    <br/>
+                    <Text type="warning" strong>Note: Replace "REPLACE_WITH_FULL_API_KEY" with the actual API key from when you created it.</Text>
                   </Text>
                   
                   {apiKeys.filter(key => key.is_active).map(key => (
                     <div key={key.id} style={{ marginBottom: 16 }}>
                       <Text strong>{key.key_name}</Text>
                       {['json', 'yaml', 'env', 'properties'].map(format => {
-                        const apiKey = key.api_key_preview.replace('...', ''); // This would need the full key
-                        const url = `${window.location.origin}/api/public/solutions/config?api_key=YOUR_FULL_API_KEY&format=${format}`;
+                        const url = `${window.location.origin}/api/public/solutions/config?api_key=REPLACE_WITH_FULL_API_KEY&format=${format}`;
                         return (
                           <div key={format} style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Text type="secondary" style={{ minWidth: 80 }}>{format.toUpperCase()}:</Text>
@@ -1308,18 +1326,22 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
         </Form>
       </Modal>
 
-      {/* Parameter Creation Modal */}
+      {/* Parameter Creation/Edit Modal */}
       <Modal
-        title="Create New Parameter"
+        title={editingParameter ? 'Edit Parameter' : 'Create New Parameter'}
         open={parameterModalVisible}
-        onCancel={() => setParameterModalVisible(false)}
+        onCancel={() => {
+          setParameterModalVisible(false);
+          setEditingParameter(null);
+          setSelectedTags([]);
+        }}
         footer={null}
         width={600}
       >
         <Form
-          form={parameterForm}
+          form={parameterFormStandalone}
           layout="vertical"
-          onFinish={handleSaveParameter}
+          onFinish={handleSaveParameterStandalone}
         >
           <Form.Item
             name="name"
@@ -1398,7 +1420,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
                 );
               }}
             >
-              {allTags.map(tag => (
+              {(allTags || []).map(tag => (
                 <Select.Option key={tag.id} value={tag.id}>
                   {tag.name}
                 </Select.Option>
@@ -1412,7 +1434,7 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
                 Cancel
               </Button>
               <Button type="primary" htmlType="submit">
-                Create Parameter
+                {editingParameter ? 'Update Parameter' : 'Create Parameter'}
               </Button>
             </Space>
           </Form.Item>
@@ -1541,6 +1563,43 @@ const SolutionManager: React.FC<SolutionManagerProps> = ({ selectedSolutionId, o
           </div>
         </Modal>
       )}
+
+      {/* Tag Creation Modal */}
+      <Modal
+        title="Create New Tag"
+        open={tagModalVisible}
+        onCancel={() => setTagModalVisible(false)}
+        footer={null}
+        width={400}
+      >
+        <Form
+          form={tagForm}
+          layout="vertical"
+          onFinish={handleSaveTag}
+        >
+          <Form.Item
+            name="name"
+            label="Tag Name"
+            rules={[
+              { required: true, message: 'Please enter a tag name' },
+              { max: 255, message: 'Name cannot exceed 255 characters' },
+            ]}
+          >
+            <Input placeholder="Enter tag name" />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
+            <Space>
+              <Button onClick={() => setTagModalVisible(false)}>
+                Cancel
+              </Button>
+              <Button type="primary" htmlType="submit">
+                Create Tag
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

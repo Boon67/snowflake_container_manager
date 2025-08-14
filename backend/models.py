@@ -148,6 +148,18 @@ class TokenData(BaseModel):
     """JWT token data model"""
     username: Optional[str] = None
 
+# --- Snowflake Authentication Models ---
+class SnowflakeLogin(BaseModel):
+    """Snowflake login credentials model"""
+    account: str = Field(..., description="Snowflake account identifier")
+    username: str = Field(..., description="Snowflake username")
+    password: str = Field(..., description="Snowflake password")
+
+class SnowflakeUser(BaseModel):
+    """Snowflake user information model"""
+    username: str = Field(..., description="Snowflake username")
+    account: str = Field(..., description="Snowflake account identifier")
+
 # --- API Response Models ---
 class APIResponse(BaseModel):
     """Standard API response model"""
