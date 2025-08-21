@@ -1,43 +1,49 @@
-# Unified Solution Configuration Manager
+# Snowflake Container Manager
 
-A comprehensive solution configuration management system with dynamic tagging and key-value parameter storage, backed by Snowflake and built with FastAPI and React.
+A comprehensive Snowflake management system for container services, compute pools, network security, analytics, and configuration management. Built with FastAPI and React, featuring Snowflake-native authentication and modern UI components.
 
 ## Features
 
-### 🏗️ **Solution Management**
+### ☁️ **Container Services Management**
+- Monitor and manage container services
+- Compute pool creation and management
+- Image repository and container image tracking
+- Service status monitoring and control
+
+### 🔒 **Network Security**
+- Network policies management with detailed information
+- Network rules configuration and monitoring
+- Policy status tracking and tooltips with detailed descriptions
+- Sortable tables with comprehensive policy data
+
+### 📊 **Analytics Dashboard**
+- Real-time credit usage tracking (compute pools and warehouses)
+- Storage usage analytics with database breakdowns
+- Monthly/weekly/daily reporting periods
+- Interactive charts and summary statistics
+
+### ⚙️ **Solution Configuration Management**
 - Create and manage configuration solutions
-- Each solution acts as a container for related parameters
-- Full CRUD operations with UUID-based identifiers
+- Dynamic key-value parameter storage with tagging
+- API key generation for third-party access
+- Export configurations in multiple formats (JSON, YAML, ENV, Properties)
 
-### ⚙️ **Dynamic Parameters**
-- Key-value configuration parameters that can be shared across solutions
-- Rich metadata including descriptions and secret marking
-- Dynamic tagging system for organization and filtering
-- Full-text search capabilities
+### 🏷️ **Tag Management**
+- Create and manage tags for organization
+- Associate tags with parameters
+- Expandable tag views with parameter listings
 
-### 🏷️ **Dynamic Tags**
-- Create tags on-the-fly
-- Associate multiple tags with parameters
-- Use for filtering, organizing, and categorizing configurations
-- Bulk tagging and untagging operations
-
-### 🔍 **Advanced Search & Filtering**
-- Filter parameters by solution, tags, key patterns
-- Search across secret and non-secret parameters
-- Bulk operations for mass management
-
-### 🔒 **Security**
-- JWT-based authentication
-- Mark sensitive parameters as secrets
-- Snowflake keypair authentication support (auto-detected)
-- Environment-based configuration
-- Automatic database and schema creation
+### 🔐 **Security**
+- **Snowflake-native authentication** - No separate user management
+- Remember account and username preferences
+- API keys for secure third-party configuration access
+- Secret parameters with plaintext export for environment configs
 
 ### 🎨 **Modern UI**
-- Dark-themed responsive interface
-- Real-time statistics and overview
-- Comprehensive management dashboards
-- Built with Ant Design and TypeScript
+- Clean header-only navigation (no sidebar)
+- Dark/Light theme toggle in user preferences
+- Responsive design with Ant Design components
+- User preferences dropdown menu
 
 ## Architecture
 
@@ -46,34 +52,35 @@ A comprehensive solution configuration management system with dynamic tagging an
 │   React App     │    │  FastAPI        │    │   Snowflake     │
 │   (Frontend)    │◄──►│  (Backend)      │◄──►│   (Database)    │
 │                 │    │                 │    │                 │
-│ • Dashboard     │    │ • Authentication│    │ • SOLUTIONS     │
-│ • Solution Mgmt │    │ • CRUD APIs     │    │ • PARAMETERS    │
-│ • Parameter Mgmt│    │ • Search/Filter │    │ • TAGS          │
-│ • Tag Mgmt      │    │ • Bulk Ops      │    │ • PARAMETER_TAGS│
-│ • Auth & Routes │    │ • Health Check  │    │ • USERS         │
+│ • Overview      │    │ • Snowflake Auth│    │ • Native Tables │
+│ • Solutions     │    │ • Container APIs│    │ • Compute Pools │
+│ • Containers    │    │ • Network APIs  │    │ • Images/Repos  │
+│ • Network Sec   │    │ • Analytics APIs│    │ • Network Policies
+│ • Analytics     │    │ • Config Export │    │ • Usage Data    │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
 ## Database Schema
 
+The application uses Snowflake's native container and compute functionality plus custom configuration tables:
+
 ```sql
--- Solutions: Top-level configuration containers
+-- Custom Configuration Tables
 SOLUTIONS (ID, NAME, DESCRIPTION, CREATED_AT, UPDATED_AT)
-
--- Parameters: Key-value pairs that can be shared across solutions
-PARAMETERS (ID, KEY, VALUE, DESCRIPTION, IS_SECRET, CREATED_AT, UPDATED_AT)
-
--- Solution-Parameter associations (many-to-many)
+PARAMETERS (ID, KEY, VALUE, DESCRIPTION, IS_SECRET, NAME, CREATED_AT, UPDATED_AT)
 SOLUTION_PARAMETERS (SOLUTION_ID, PARAMETER_ID)
-
--- Tags: Dynamic labels for organization
 TAGS (ID, NAME, CREATED_AT)
-
--- Parameter-Tag relationships
 PARAMETER_TAGS (PARAMETER_ID, TAG_ID)
+SOLUTION_API_KEYS (ID, SOLUTION_ID, KEY_NAME, API_KEY, IS_ACTIVE, CREATED_AT, LAST_USED, EXPIRES_AT)
 
--- Users: Authentication
-USERS (ID, USERNAME, HASHED_PASSWORD, CREATED_AT)
+-- Snowflake Native Resources (accessed via SQL)
+-- SHOW COMPUTE POOLS
+-- SHOW CONTAINER SERVICES  
+-- SHOW IMAGE REPOSITORIES
+-- SHOW IMAGES IN REPOSITORY
+-- SHOW NETWORK POLICIES
+-- SHOW NETWORK RULES
+-- ACCOUNT_USAGE views for analytics
 ```
 
 ## Quick Start
@@ -81,42 +88,37 @@ USERS (ID, USERNAME, HASHED_PASSWORD, CREATED_AT)
 ### Prerequisites
 - Python 3.8+
 - Node.js 16+
-- Snowflake account with database access
+- Snowflake account with container services enabled
+- Snowflake keypair authentication setup (see `docs/KEYPAIR_SETUP.md`)
 
 ### 1. Environment Setup
 ```bash
 # Clone and setup
-git clone <repository>
-cd slack_agent_server
+git clone https://github.com/Boon67/snowflake_container_manager.git
+cd snowflake_container_manager
 
 # Copy environment template
 cp .env.example backend/.env
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure Snowflake Authentication
 ```bash
 # Edit backend/.env with your Snowflake credentials
 SNOWFLAKE_ACCOUNT=your_account
 SNOWFLAKE_USER=your_username
 SNOWFLAKE_WAREHOUSE=your_warehouse
-SNOWFLAKE_DATABASE=your_database
+SNOWFLAKE_DATABASE=APPS
 SNOWFLAKE_SCHEMA=CONFIG
 
-# Authentication (choose one method):
-# Option 1: Password Authentication
-SNOWFLAKE_PASSWORD=your_password
-
-# Option 2: Keypair Authentication (preferred for production)
-# SNOWFLAKE_PRIVATE_KEY_PATH=secrets/snowflake_private_key.pem
+# Keypair Authentication (recommended)
+SNOWFLAKE_PRIVATE_KEY_PATH=secrets/snowflake_private_key.pem
 # SNOWFLAKE_PRIVATE_KEY_PASSPHRASE=optional_passphrase
 
-# Authentication settings
-SECRET_KEY=your_secret_key
-DEFAULT_USERNAME=admin
-DEFAULT_PASSWORD=admin
+# JWT Secret for session management
+SECRET_KEY=your_secret_key_here
 ```
 
-**Note**: The application will automatically create the database and schema if they don't exist, so you only need to ensure your Snowflake user has the necessary permissions.
+**Note**: The application will automatically create the `APPS` database and `CONFIG` schema if they don't exist.
 
 ### 3. Backend Setup
 ```bash
@@ -129,6 +131,7 @@ pip install -r requirements.txt
 # Run backend
 python main.py
 # Backend will be available at http://localhost:8000
+# API docs at http://localhost:8000/docs
 ```
 
 ### 4. Frontend Setup
@@ -144,28 +147,59 @@ npm start
 # Frontend will be available at http://localhost:3000
 ```
 
-### 5. Production Deployment
-```bash
-# Make setup script executable
-chmod +x setup.sh
+## Usage
 
-# Run setup (creates venv, installs deps, builds frontend)
-./setup.sh
+### Authentication
+1. Navigate to `http://localhost:3000`
+2. Login with your Snowflake credentials
+3. Account name is remembered automatically
+4. Optional username remembering with checkbox
 
-# Start application
-./start.sh
+### Configuration Export
+Generate API keys for third-party access to your configurations:
+
+1. Go to **Solutions** → Edit a solution → **API Keys** tab
+2. Click **Generate API Key**
+3. Copy the generated key
+4. Use the public endpoint:
+   ```
+   GET /api/public/solutions/config?api_key=YOUR_KEY&format=json
+   ```
+
+**Available formats**: `json`, `yaml`, `env`, `properties`
+
+**Example response** (simple key-value pairs with secrets included):
+```json
+{
+  "app_name": "Configuration Manager",
+  "environment": "production",
+  "secret_key": "actual-secret-value",
+  "db_connection_timeout": "30"
+}
 ```
+
+### Tab Navigation
+- **Overview**: Dashboard with system statistics
+- **Solutions**: Configuration management with parameters and tags
+- **Container Services**: Compute pools, image repositories, container images
+- **Network Security**: Network policies and rules management
+- **Analytics**: Credit usage, storage analytics, and reporting
+
+### User Preferences
+Click on your user icon in the header to access:
+- **Theme Toggle**: Switch between light and dark modes
+- **Logout**: Sign out of the application
 
 ## Development
 
 ### Project Structure
 ```
-slack_agent_server/
+snowflake_container_manager/
 ├── backend/
-│   ├── main.py              # FastAPI application
+│   ├── main.py              # FastAPI application with all endpoints
 │   ├── models.py            # Pydantic data models
 │   ├── database.py          # Snowflake connection and queries
-│   ├── auth.py              # JWT authentication
+│   ├── auth.py              # Snowflake authentication
 │   ├── requirements.txt     # Python dependencies
 │   ├── .env                 # Environment variables
 │   ├── .venv/               # Python virtual environment
@@ -173,16 +207,35 @@ slack_agent_server/
 ├── frontend/                # React TypeScript app
 │   ├── src/
 │   │   ├── components/      # React components
+│   │   │   ├── Dashboard.tsx           # Main layout (header-only)
+│   │   │   ├── Overview.tsx            # Dashboard overview
+│   │   │   ├── SolutionManager.tsx     # Solutions and configuration
+│   │   │   ├── ContainerServiceManager.tsx # Container services
+│   │   │   ├── NetworkManager.tsx      # Network security
+│   │   │   ├── Analytics.tsx           # Analytics dashboard
+│   │   │   └── Login.tsx               # Snowflake authentication
 │   │   ├── services/        # API service layer
-│   │   ├── contexts/        # React contexts
+│   │   ├── contexts/        # React contexts (Auth, Theme)
 │   │   └── App.tsx          # Main app component
-│   ├── package.json         # Node dependencies
+│   ├── package.json         # Node dependencies (with proxy config)
 │   └── tsconfig.json        # TypeScript config
+├── docs/                    # Documentation
+│   └── KEYPAIR_SETUP.md     # Snowflake keypair setup guide
 ├── setup.sh                 # Setup script
 ├── start.sh                 # Start script
-├── dev.sh                   # Development backend script
-└── .env.example             # Environment template
+└── dev.sh                   # Development backend script
 ```
+
+### Key Features Implemented
+- ✅ Snowflake-native authentication (no separate user management)
+- ✅ Simple key-value configuration export with secrets
+- ✅ Header-only navigation (sidebar removed)
+- ✅ User preferences dropdown with theme toggle
+- ✅ Tag management with expandable parameter views
+- ✅ Network policy tooltips with detailed information
+- ✅ Analytics tab moved to last position
+- ✅ Comprehensive container services management
+- ✅ API key generation for third-party access
 
 ### Development Scripts
 
@@ -202,4 +255,46 @@ slack_agent_server/
 ```bash
 # Set up development environment
 ./setup.sh
-``` 
+```
+
+## API Endpoints
+
+### Authentication
+- `POST /api/token` - Snowflake authentication
+- `GET /api/user/me` - Get current user info
+
+### Public Configuration Access
+- `GET /api/public/solutions/config` - Export solution config (requires API key)
+
+### Solutions & Configuration
+- `GET /api/solutions` - List solutions
+- `POST /api/solutions` - Create solution
+- `GET /api/parameters` - List parameters
+- `GET /api/tags` - List tags
+
+### Container Services
+- `GET /api/compute-pools` - List compute pools
+- `GET /api/container-services` - List container services
+- `GET /api/image-repositories` - List image repositories
+- `GET /api/images` - List container images
+
+### Network Security
+- `GET /api/network-policies` - List network policies
+- `GET /api/network-rules` - List network rules
+
+### Analytics
+- `POST /api/analytics/credit-usage` - Get credit usage data
+- `POST /api/analytics/storage-usage` - Get storage usage data
+- `POST /api/analytics/warehouse-credit-usage` - Get warehouse credit usage
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## License
+
+[Your License Here]
